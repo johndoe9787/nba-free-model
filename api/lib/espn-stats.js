@@ -69,6 +69,7 @@ function parseStatsRow(stats) {
     ast: num(stats[IDX.ast]),
     blk: num(stats[IDX.blk]),
     stl: num(stats[IDX.stl]),
+    tov: num(stats[IDX.to]),
     pts: num(stats[IDX.pts]),
   };
 }
@@ -172,6 +173,9 @@ export async function getSeasonAverages(athleteId, { season } = {}) {
     ftm: avg("ftm"),
     fta: avg("fta"),
     ft_pct: avg("ft_pct"),
+    blk: avg("blk"),
+    stl: avg("stl"),
+    tov: avg("tov"),
   };
 }
 
@@ -215,9 +219,15 @@ export async function getLastNGames(athleteId, n = 5, { season, postseason = fal
     reb: g.reb,
     ast: g.ast,
     fg3m: g.fg3m,
+    fg3a: g.fg3a,
     fgm: g.fgm,
     fga: g.fga,
     fg_pct: g.fg_pct,
+    ftm: g.ftm,
+    fta: g.fta,
+    blk: g.blk,
+    stl: g.stl,
+    tov: g.tov,
     pra: g.pts + g.reb + g.ast,
   }));
   if (!games.length) return null;
@@ -232,7 +242,14 @@ export async function getLastNGames(athleteId, n = 5, { season, postseason = fal
       rpg: avg("reb"),
       apg: avg("ast"),
       fg3m: avg("fg3m"),
+      fg3a: avg("fg3a"),
+      fgm: avg("fgm"),
       fga: avg("fga"),
+      ftm: avg("ftm"),
+      fta: avg("fta"),
+      blk: avg("blk"),
+      stl: avg("stl"),
+      tov: avg("tov"),
       pra: avg("pra"),
       minutes: avg("minutes"),
     },

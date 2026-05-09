@@ -3,7 +3,13 @@ import playersData from "../data/players.json";
 
 const NBA_PLAYERS = Object.keys(playersData);
 
-const STATS = ["Points", "Rebounds", "Assists", "PRA", "PR", "PA", "RA", "3-Pointers Made", "FG Attempted"];
+const STATS = [
+  "Points", "Rebounds", "Assists", "PRA", "PR", "PA", "RA",
+  "3-Pointers Made", "3-Pointers Attempted",
+  "FG Made", "FG Attempted",
+  "Free Throws Made", "Free Throws Attempted",
+  "Blocks", "Steals", "Turnovers",
+];
 const DIRECTIONS = ["Over", "Under"];
 
 const TIER_CONFIG = {

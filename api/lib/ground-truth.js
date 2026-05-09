@@ -150,10 +150,14 @@ function pickAverages(s) {
     fga: s.fga,
     fg_pct: s.fg_pct,
     fg3m: s.fg3m,
+    fg3a: s.fg3a,
     fg3_pct: s.fg3_pct,
     ftm: s.ftm,
     fta: s.fta,
     ft_pct: s.ft_pct,
+    blk: s.blk,
+    stl: s.stl,
+    tov: s.tov,
   };
 }
 

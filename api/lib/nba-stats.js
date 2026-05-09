@@ -77,6 +77,9 @@ function pickAverages(row) {
     ftm: row.FTM,
     fta: row.FTA,
     ft_pct: row.FT_PCT,
+    blk: row.BLK,
+    stl: row.STL,
+    tov: row.TOV,
   };
 }
 
@@ -139,9 +142,15 @@ export async function getLastNGames(playerId, n = 5, {
       reb: o.REB,
       ast: o.AST,
       fg3m: o.FG3M,
+      fg3a: o.FG3A,
       fgm: o.FGM,
       fga: o.FGA,
       fg_pct: o.FG_PCT,
+      ftm: o.FTM,
+      fta: o.FTA,
+      blk: o.BLK,
+      stl: o.STL,
+      tov: o.TOV,
       pra: (o.PTS ?? 0) + (o.REB ?? 0) + (o.AST ?? 0),
     };
   });
@@ -158,7 +167,14 @@ export async function getLastNGames(playerId, n = 5, {
       rpg: avg("reb"),
       apg: avg("ast"),
       fg3m: avg("fg3m"),
+      fg3a: avg("fg3a"),
+      fgm: avg("fgm"),
       fga: avg("fga"),
+      ftm: avg("ftm"),
+      fta: avg("fta"),
+      blk: avg("blk"),
+      stl: avg("stl"),
+      tov: avg("tov"),
       pra: avg("pra"),
       minutes: avg("minutes"),
     },
