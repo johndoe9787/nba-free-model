@@ -1,6 +1,43 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import nbaPlayersData from "../data/players.json";
 import wnbaPlayersData from "../data/players-wnba.json";
+
+// Pick log shape (v1) — kept stable so a future server-side migration is straightforward:
+//   { ts: ISO8601, league, player, prop_type, line, direction: "OVER"|"UNDER"|"SKIP",
+//     tier, verdict, confidence, flags_summary: string,
+//     season_avg, l5_avg, win_prob, opponent,
+//     tentative_p, multiplier, tentative_ev,
+//     outcome: null | "W" | "L" | "Push" | "Void" }
+const PICK_LOG_KEY = "pickLog.v1";
+const DEFAULT_MULTIPLIER = 3.0; // 2-leg Power Play default
+// Tier → midpoint probability. These are decision-category proxies, NOT
+// calibrated. Surfaces "what would EV be IF the tier label matches reality" —
+// until enough outcomes accumulate to fit calibration in Phase 2.
+const TIER_MIDPOINT = { S: 0.86, A: 0.75, B: 0.65, SKIP: 0.50 };
+
+function tierImpliedP(tier) {
+  return TIER_MIDPOINT[tier] ?? null;
+}
+function tentativeEv(p, multiplier) {
+  if (p == null || !Number.isFinite(multiplier) || multiplier <= 0) return null;
+  return p * multiplier - 1;
+}
+function loadPickLog() {
+  try {
+    const raw = localStorage.getItem(PICK_LOG_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+function savePickLog(entries) {
+  localStorage.setItem(PICK_LOG_KEY, JSON.stringify(entries));
+}
+function dedupeKey(entry) {
+  return `${entry.ts}|${entry.player}|${entry.prop_type}|${entry.line}`;
+}
 
 const PLAYERS_BY_LEAGUE = {
   nba: Object.keys(nbaPlayersData).sort(),
@@ -60,6 +97,11 @@ export default function App() {
   const [playerQuery, setPlayerQuery] = useState("");
   const [playerOpen, setPlayerOpen] = useState(false);
   const [playerHighlight, setPlayerHighlight] = useState(0);
+  const [multiplier, setMultiplier] = useState(DEFAULT_MULTIPLIER);
+  const [pickLog, setPickLog] = useState(() => loadPickLog());
+  const [logOpen, setLogOpen] = useState(false);
+  const importInputRef = useRef(null);
+  const lastLoggedKey = useRef(null);
 
   const sortedPlayers = PLAYERS_BY_LEAGUE[league];
 
@@ -134,6 +176,106 @@ export default function App() {
       setLoading(false);
     }
   }, [player, propType, line, league]);
+
+  // Persist pick log to localStorage whenever it changes.
+  useEffect(() => {
+    savePickLog(pickLog);
+  }, [pickLog]);
+
+  // Append the most recent verdict to the pick log exactly once. Re-runs of
+  // the same analysis (same player/prop/line) skip; new analyses append.
+  useEffect(() => {
+    if (!result || !result.tier) return;
+    const ts = new Date().toISOString();
+    const entry = {
+      ts,
+      league,
+      player,
+      prop_type: propType,
+      line: Number(line),
+      direction: result.verdict,
+      tier: result.tier,
+      verdict: result.verdict,
+      confidence: result.confidence,
+      flags_summary: (result.flags ?? []).join(" | "),
+      season_avg: result.data_used?.season_avg ?? null,
+      l5_avg: result.data_used?.l5_avg ?? null,
+      win_prob: result.data_used?.win_prob ?? null,
+      opponent: result.data_used?.opponent ?? null,
+      tentative_p: tierImpliedP(result.tier),
+      multiplier,
+      tentative_ev: tentativeEv(tierImpliedP(result.tier), multiplier),
+      outcome: null,
+    };
+    const key = `${player}|${propType}|${line}|${result.tier}|${result.verdict}|${result.confidence}`;
+    if (lastLoggedKey.current === key) return;
+    lastLoggedKey.current = key;
+    setPickLog((prev) => [entry, ...prev]);
+    // multiplier intentionally excluded: changing it after a verdict should not
+    // re-log; the user can edit the multiplier on the entry directly later.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+
+  const setOutcome = useCallback((ts, outcome) => {
+    setPickLog((prev) => prev.map((p) => (p.ts === ts ? { ...p, outcome } : p)));
+  }, []);
+  const deleteEntry = useCallback((ts) => {
+    setPickLog((prev) => prev.filter((p) => p.ts !== ts));
+  }, []);
+  const clearLog = useCallback(() => {
+    if (confirm(`Delete all ${pickLog.length} pick log entries? This cannot be undone.`)) {
+      setPickLog([]);
+    }
+  }, [pickLog.length]);
+  const exportLog = useCallback(() => {
+    const blob = new Blob([JSON.stringify(pickLog, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pick-log-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [pickLog]);
+  const importLog = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        setPickLog((prev) => {
+          const seen = new Set(prev.map(dedupeKey));
+          const additions = parsed.filter((p) => p && p.ts && !seen.has(dedupeKey(p)));
+          return [...additions, ...prev];
+        });
+      } catch (err) {
+        alert(`Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // allow re-importing the same file
+  }, []);
+
+  const logStats = useMemo(() => {
+    const decided = pickLog.filter((p) => p.outcome === "W" || p.outcome === "L");
+    const n = decided.length;
+    if (n === 0) return { n: 0, hitRate: null, ci: null, total: pickLog.length };
+    const wins = decided.filter((p) => p.outcome === "W").length;
+    const hitRate = wins / n;
+    // Wilson 95% CI — small-n appropriate (vs. normal approximation which
+    // breaks at the bounds when n is tiny).
+    const z = 1.96;
+    const denom = 1 + (z * z) / n;
+    const centre = hitRate + (z * z) / (2 * n);
+    const margin = z * Math.sqrt((hitRate * (1 - hitRate)) / n + (z * z) / (4 * n * n));
+    const lo = Math.max(0, (centre - margin) / denom);
+    const hi = Math.min(1, (centre + margin) / denom);
+    return { n, hitRate, ci: [lo, hi], total: pickLog.length };
+  }, [pickLog]);
+
+  const resultP = result ? tierImpliedP(result.tier) : null;
+  const resultEv = tentativeEv(resultP, multiplier);
 
   const tierCfg = result ? TIER_CONFIG[result.tier] || TIER_CONFIG.SKIP : null;
   const verdictCfg = result ? VERDICT_CONFIG[result.verdict] || VERDICT_CONFIG.SKIP : null;
@@ -515,6 +657,59 @@ export default function App() {
               </div>
             )}
 
+            {/* Tier-implied P + tentative EV (uncalibrated; for navigation only) */}
+            {resultP != null && (
+              <div style={{ padding: "12px 20px", borderBottom: "1px solid #1e3040" }}>
+                <div style={{ fontSize: 10, color: "#446688", letterSpacing: 2, marginBottom: 8 }}>
+                  TIER-IMPLIED EV (UNCALIBRATED)
+                </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ background: "#0a1420", border: "1px solid #1e3040", padding: "8px 10px" }}>
+                    <div style={{ fontSize: 9, color: "#446688", letterSpacing: 1, marginBottom: 3 }}>TIER-IMPLIED P</div>
+                    <div style={{ fontSize: 12, color: "#8ab0cc" }}>{Math.round(resultP * 100)}%</div>
+                  </div>
+                  <div style={{ background: "#0a1420", border: "1px solid #1e3040", padding: "8px 10px" }}>
+                    <div style={{ fontSize: 9, color: "#446688", letterSpacing: 1, marginBottom: 3 }}>SLIP MULTIPLIER</div>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1"
+                      value={multiplier}
+                      onChange={(e) => setMultiplier(Number(e.target.value) || 0)}
+                      style={{
+                        background: "transparent",
+                        color: "#8ab0cc",
+                        border: "none",
+                        outline: "none",
+                        fontFamily: "'Courier New', monospace",
+                        fontSize: 12,
+                        width: 50,
+                        padding: 0,
+                      }}
+                    />
+                  </div>
+                  <div style={{
+                    background: "#0a1420",
+                    border: `1px solid ${resultEv != null && resultEv < 0 ? "#FF444466" : "#1e3040"}`,
+                    padding: "8px 10px",
+                  }}>
+                    <div style={{ fontSize: 9, color: "#446688", letterSpacing: 1, marginBottom: 3 }}>EV PER UNIT</div>
+                    <div style={{ fontSize: 12, color: resultEv != null && resultEv < 0 ? "#FF6644" : "#00FF88" }}>
+                      {resultEv != null ? (resultEv >= 0 ? "+" : "") + resultEv.toFixed(3) : "—"}
+                    </div>
+                  </div>
+                  {resultEv != null && resultEv < 0 && (
+                    <div style={{ fontSize: 11, color: "#FF6644" }}>
+                      ⚠️ tier-implied EV negative at {multiplier}× — slip needs higher multiplier or tier needs higher P to clear
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: "#446688", marginTop: 8, lineHeight: 1.5 }}>
+                  Tier midpoints used: S=86%, A=75%, B=65%, SKIP=50%. Not calibrated — informational until pick log accumulates outcomes.
+                </div>
+              </div>
+            )}
+
             {/* Data used */}
             {result.data_used && (
               <div style={{ padding: "12px 20px" }}>
@@ -553,7 +748,166 @@ export default function App() {
           </div>
         )}
 
+        {/* Pick log — local-only, exportable */}
+        <div style={{ marginTop: 24, border: "1px solid #1e3040" }}>
+          <button
+            onClick={() => setLogOpen((v) => !v)}
+            style={{
+              width: "100%",
+              background: "#0a1420",
+              color: "#7799bb",
+              border: "none",
+              padding: "10px 14px",
+              fontFamily: "'Courier New', monospace",
+              fontSize: 11,
+              letterSpacing: 2,
+              cursor: "pointer",
+              textAlign: "left",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+            aria-expanded={logOpen}
+          >
+            <span>PICK LOG ({pickLog.length})</span>
+            <span style={{ fontSize: 14 }}>{logOpen ? "▾" : "▸"}</span>
+          </button>
+          {logOpen && (
+            <div style={{ borderTop: "1px solid #1e3040" }}>
+              <div style={{
+                padding: "10px 14px",
+                fontSize: 11,
+                color: "#446688",
+                lineHeight: 1.6,
+                borderBottom: "1px solid #1e3040",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                alignItems: "center",
+              }}>
+                {logStats.n > 0 ? (
+                  <span>
+                    decided: {logStats.n}/{logStats.total} ·
+                    {" "}observed hit rate: <span style={{ color: "#8ab0cc" }}>{(logStats.hitRate * 100).toFixed(1)}%</span>
+                    {" "}· 95% CI: [{(logStats.ci[0] * 100).toFixed(0)}%, {(logStats.ci[1] * 100).toFixed(0)}%]
+                  </span>
+                ) : (
+                  <span>no decided outcomes yet — mark picks W/L to compute hit rate</span>
+                )}
+                <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <button
+                    onClick={exportLog}
+                    disabled={pickLog.length === 0}
+                    style={smallBtn(pickLog.length === 0)}
+                  >EXPORT</button>
+                  <button
+                    onClick={() => importInputRef.current?.click()}
+                    style={smallBtn(false)}
+                  >IMPORT</button>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={importLog}
+                    style={{ display: "none" }}
+                  />
+                  <button
+                    onClick={clearLog}
+                    disabled={pickLog.length === 0}
+                    style={smallBtn(pickLog.length === 0, "#FF444466")}
+                  >CLEAR</button>
+                </span>
+              </div>
+              {pickLog.length === 0 ? (
+                <div style={{ padding: "14px", fontSize: 11, color: "#446688", textAlign: "center" }}>
+                  log is empty — run an analysis to start tracking
+                </div>
+              ) : (
+                <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                  {pickLog.map((p) => (
+                    <div key={p.ts} style={{
+                      padding: "8px 14px",
+                      borderTop: "1px solid #0e1a26",
+                      fontSize: 11,
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 8,
+                      alignItems: "center",
+                    }}>
+                      <div>
+                        <div style={{ color: "#8ab0cc" }}>
+                          <span style={{ color: outcomeColor(p.outcome) }}>{outcomeSymbol(p.outcome)}</span>
+                          {" "}{p.player} · {p.prop_type} {p.line} · <span style={{ color: tierColor(p.tier) }}>{p.tier}</span> {p.confidence}%
+                        </div>
+                        <div style={{ color: "#446688", fontSize: 10, marginTop: 2 }}>
+                          {p.ts.slice(0, 16).replace("T", " ")} · {p.league?.toUpperCase()} · vs {p.opponent ?? "—"} · EV {p.tentative_ev != null ? (p.tentative_ev >= 0 ? "+" : "") + p.tentative_ev.toFixed(2) : "—"} @ {p.multiplier}×
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {["W", "L", "Push", "Void"].map((o) => (
+                          <button
+                            key={o}
+                            onClick={() => setOutcome(p.ts, p.outcome === o ? null : o)}
+                            style={outcomeBtn(p.outcome === o, o)}
+                          >{o[0]}</button>
+                        ))}
+                        <button onClick={() => deleteEntry(p.ts)} style={smallBtn(false, "#FF444466")}>×</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
+}
+
+function smallBtn(disabled, borderColor) {
+  return {
+    background: disabled ? "#0a1420" : "#102030",
+    color: disabled ? "#334455" : "#7799bb",
+    border: `1px solid ${borderColor ?? "#1e3040"}`,
+    padding: "4px 8px",
+    fontFamily: "'Courier New', monospace",
+    fontSize: 10,
+    letterSpacing: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
+}
+function outcomeColor(o) {
+  if (o === "W") return "#00FF88";
+  if (o === "L") return "#FF6644";
+  if (o === "Push") return "#FFAA44";
+  if (o === "Void") return "#888888";
+  return "#446688";
+}
+function outcomeSymbol(o) {
+  if (o === "W") return "✓";
+  if (o === "L") return "✗";
+  if (o === "Push") return "=";
+  if (o === "Void") return "∅";
+  return "·";
+}
+function outcomeBtn(active, label) {
+  return {
+    background: active ? outcomeColor(label) + "33" : "#0a1420",
+    color: active ? outcomeColor(label) : "#446688",
+    border: `1px solid ${active ? outcomeColor(label) + "88" : "#1e3040"}`,
+    padding: "3px 7px",
+    fontFamily: "'Courier New', monospace",
+    fontSize: 10,
+    fontWeight: "bold",
+    cursor: "pointer",
+    minWidth: 22,
+  };
+}
+function tierColor(t) {
+  if (t === "S") return "#FFD700";
+  if (t === "A") return "#00FF88";
+  if (t === "B") return "#4488FF";
+  return "#FF4444";
 }

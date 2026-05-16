@@ -10,12 +10,14 @@ export function composeGroundTruth({
   propType,
   line,
   league = "nba",
-  info,           // commonPlayerInfo (NBA stats)
+  leagueCfg,      // Required for derived.ft_floor_baseline lookup
+  info,           // commonPlayerInfo (NBA stats) — info.position used for FT-floor
   game,           // ESPN game (or null)
   daysOut = 0,   // 0 = today, 1+ = upcoming game found via lookahead
   seasonType,    // "Regular Season" | "Playoffs"
   seasonAvg,     // Regular-season averages, used as stable baseline
   l5,            // Last 5 in current seasonType
+  l20,           // Last 20 in current seasonType — used for variance only (averages unchanged)
   splits,        // Home/Away splits (regular season)
   winProb,       // ESPN predictor result
   allInjuries,   // ESPN league-wide injury list
@@ -111,6 +113,8 @@ export function composeGroundTruth({
       ? { ...opponentDefense, primary_defender: primaryDefender ?? null }
       : (primaryDefender ? { primary_defender: primaryDefender } : null),
     series,
+    variance: computeVariance(l20?.games),
+    derived: deriveValues({ info, leagueCfg }),
   };
 
   const missing = [];
@@ -136,6 +140,51 @@ function enrichL5Averages(a) {
     pa: round1(ppg + apg),
     ra: round1(rpg + apg),
   };
+}
+
+// Population σ over a per-game sample. n<8 returns nulls — a smaller window
+// is too noisy for the Rule 5a addendum to act on. stats.nba.com playergamelog
+// supplies pts/reb/ast as integers per game, so square-root of variance is
+// stable as soon as 8+ games exist.
+export function computeVariance(games) {
+  if (!Array.isArray(games) || games.length < 8) {
+    return { ppg_stddev: null, rpg_stddev: null, apg_stddev: null, n_games: games?.length ?? 0 };
+  }
+  const sigma = (key) => {
+    const xs = games.map((g) => g[key] ?? 0);
+    const mean = xs.reduce((s, x) => s + x, 0) / xs.length;
+    const variance = xs.reduce((s, x) => s + (x - mean) ** 2, 0) / xs.length;
+    return Number(Math.sqrt(variance).toFixed(2));
+  };
+  return {
+    ppg_stddev: sigma("pts"),
+    rpg_stddev: sigma("reb"),
+    apg_stddev: sigma("ast"),
+    n_games: games.length,
+  };
+}
+
+// stats.nba.com `commonplayerinfo.POSITION` returns NBA-style strings:
+// "Guard", "Forward", "Center", "Guard-Forward", "Forward-Guard",
+// "Forward-Center", "Center-Forward". Hyphenated forms list the primary
+// designation first.
+export function normalizePosition(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const primary = raw.split("-")[0].trim().toLowerCase();
+  if (primary === "guard") return "G";
+  if (primary === "forward") return "F";
+  if (primary === "center") return "C";
+  return null;
+}
+
+function deriveValues({ info, leagueCfg }) {
+  const table = leagueCfg?.framework?.ft_floor_by_position;
+  if (!table) return null;
+  const pos = normalizePosition(info?.position);
+  // Forward used as the safe fallback when ESPN/balldontlie identity paths
+  // didn't supply position — F sits between G and C in every league table.
+  const ft_floor_baseline = table[pos] ?? table.F;
+  return { player_position: pos, ft_floor_baseline };
 }
 
 function pickAverages(s) {

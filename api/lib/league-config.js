@@ -68,8 +68,12 @@ const CONFIGS = {
       game_minutes: 48,
       // Rule 5a road points deduction.
       road_deduction_pts: 1.5,
-      // Rule 5i worst-case FG floor (8 pts vs elite D).
-      ft_floor_fg_baseline: 8,
+      // Rule 5i worst-case FG floor vs elite D, keyed by normalized position.
+      // Guards are smaller-volume FG scorers vs elite D; centers retain the
+      // highest floor from rim/putback opportunities even when locked up.
+      ft_floor_by_position: { G: 6, F: 8, C: 10 },
+      // Rule 5a addendum threshold: widen OVER buffer when ppg σ exceeds this.
+      variance_threshold_ppg: 6,
       // Playoff series lengths used in the Game 1 / Game 2 hard caps.
       playoff_series: { first_round: 7, semis: 7, conf_finals: 7, finals: 7 },
     },
@@ -88,7 +92,9 @@ const CONFIGS = {
       // WNBA scoring scales ~83% of NBA (40/48 of game length). Road
       // deduction and FT-floor baseline scale proportionally.
       road_deduction_pts: 1.2,
-      ft_floor_fg_baseline: 6,
+      ft_floor_by_position: { G: 4, F: 6, C: 8 },
+      // ppg σ threshold scaled by 40/48 from the NBA 6.0 — round to 5.
+      variance_threshold_ppg: 5,
       // WNBA 2024+ format: best-of-3 first round, best-of-5 semis, best-of-7 finals.
       playoff_series: { first_round: 3, semis: 5, conf_finals: 5, finals: 7 },
     },

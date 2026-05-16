@@ -56,6 +56,7 @@ ROAD DEDUCTION (Rule 5a): Subtract ${f.road_deduction_pts} pts from season avg a
 OVER BUFFER RULES:
 - Line must be 1.5+ pts BELOW road-adjusted baseline to qualify
 - Poor FT shooters (<70%): extra 2pt buffer
+- [v3.4] Variance-Adjusted Buffer (Rule 5a addendum): when groundTruth.variance.ppg_stddev is non-null AND > ${f.variance_threshold_ppg}, widen the OVER buffer from 1.5 to 1.5 + 0.25 × (ppg_stddev − ${f.variance_threshold_ppg}). Applies to points-family props (Points, PRA, PR, PA). Cite the σ value used in the justification. When variance.ppg_stddev is null (sample <8 games), proceed with the baseline 1.5 buffer.
 
 WIN PROBABILITY BLOWOUT SUPPRESSOR (Rule 5f):
 - 85-90% win prob: A-tier max OVER
@@ -74,7 +75,7 @@ When ALL THREE hold pre-tip — (a) leading team's win_prob ≥ 0.80, (b) opposi
 [v3.4] RULE 5i — FT-FLOOR INSURANCE GUARD (UNDER picks):
 For Points/PRA UNDER on a player with season.averages.fta ≥ 5:
   ft_floor_pts = season.averages.fta × season.averages.ft_pct
-  total_floor  = ft_floor_pts + ${f.ft_floor_fg_baseline}         (${f.ft_floor_fg_baseline} = worst-case FG floor vs elite D)
+  total_floor  = ft_floor_pts + groundTruth.derived.ft_floor_baseline   (per-position worst-case FG floor vs elite D — G/F/C lookup; falls back to F when position unknown)
 - If total_floor ≥ line: UNDER INVALID (regardless of named-defender suppression). Set verdict=SKIP.
 - If total_floor < line - 2: UNDER valid (other 5g mechanism still required).
 - If line - 2 ≤ total_floor < line: UNDER A-tier max, requires Mechanism 1 OR 2 confirmed.

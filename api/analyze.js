@@ -115,12 +115,20 @@ export async function gatherGroundTruth({ player, propType, line, league = "nba"
   // WNBA uses STD for regular season, etc.) so we ignore it here.
   const isPlayoff = !!game.series;
   const seasonType = isPlayoff ? "Playoffs" : "Regular Season";
-  let l5 = await getLastNGames(playerId, 5, { seasonType, leagueId });
+  // L5 is the Gemini-visible recent baseline. L20 is fetched only to compute
+  // per-player σ for the Rule 5a variance addendum — the averages displayed
+  // to Gemini are unchanged. Both share the same playergamelog payload, so
+  // the cost is one additional request to the same endpoint (no new client).
+  let [l5, l20] = await Promise.all([
+    getLastNGames(playerId, 5, { seasonType, leagueId }),
+    getLastNGames(playerId, 20, { seasonType, leagueId }),
+  ]);
   trace.l5 = l5?.games?.length ? "nba_stats" : null;
   if (!trace.l5) {
     l5 = await espnStats.getLastNGames(espnId, 5, { season, postseason: isPlayoff, league });
     trace.l5 = l5?.games?.length ? "espn_gamelog" : "missing";
   }
+  trace.l20 = l20?.games?.length ? "nba_stats" : "missing";
 
   // Splits and opponent defense use regular season — playoff samples are too
   // small (5–28 games) to be a stable baseline. Same logic as Rule 5a road
@@ -142,9 +150,9 @@ export async function gatherGroundTruth({ player, propType, line, league = "nba"
   trace.season_avg = nbaSeasonAvg ? "nba_stats" : (seasonAvg ? "espn_gamelog" : "missing");
 
   const { groundTruth, missing } = composeGroundTruth({
-    player, propType, line, league,
+    player, propType, line, league, leagueCfg,
     info, game, daysOut, seasonType,
-    seasonAvg, l5, splits, winProb, allInjuries, opponentDefense, primaryDefender,
+    seasonAvg, l5, l20, splits, winProb, allInjuries, opponentDefense, primaryDefender,
   });
 
   return { groundTruth, missing, trace, leagueCfg };
@@ -299,6 +307,8 @@ WHERE TO FIND VALUES (path → meaning):
 - groundTruth.player_recent.is_listed_injured                                                 → boolean — TRUE means post-injury return gate (Section 6) applies
 - groundTruth.opponent_defense                                                                → {def_rating, def_rank (1-30, 1=best), primary_defender: {player, share_pct, n_games, confirmed} | null, source}; null only when both live and snapshot fail. primary_defender is the season-aggregated top defender vs this player from stats.nba.com matchup data; confirmed=true when share_pct >= 0.40. Use def_rank for Rule 5h baseline + Mechanism 3 matchup ceiling (top-5 = def_rank<=5); use primary_defender to gate the v3.4 5h FT-leak modifier on a named matchup.
 - groundTruth.series                                                                          → playoff series state {games_played, player_team_wins, opponent_wins, next_game_number, series_record, series_summary, leading_team_abbr, round, source}; null in regular season. leading_team_abbr is null when series is tied, otherwise the abbr of the team ahead — use it for Rule 5f tied-series and lead-3-0/3-1 gating instead of parsing series_record or series_summary.
+- groundTruth.variance                                                                        → {ppg_stddev, rpg_stddev, apg_stddev, n_games} computed from the last 20 games in current seasonType; nulls when n_games<8. Drives the Rule 5a Variance-Adjusted Buffer addendum on points-family OVERs.
+- groundTruth.derived                                                                         → {player_position: "G"|"F"|"C"|null, ft_floor_baseline} — ft_floor_baseline is the per-position worst-case FG floor vs elite D used in Rule 5i. Use this value as the FG-floor constant in the 5i computation; do NOT substitute any other number.
 
 For this prop ("${groundTruth.prop_type}" line ${groundTruth.line}), the relevant averages field is "${field ?? "(unknown — output SKIP)"}". Use season.averages.${field ?? "?"} and l5.averages.${field ?? "?"} as the baselines.
 
