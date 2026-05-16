@@ -271,7 +271,7 @@ export function buildPrompt(framework, groundTruth, leagueCfg = getLeagueConfig(
   const forwardLookingNote = daysOut > 0
     ? `\n\nFORWARD-LOOKING GAME: groundTruth.game.days_out is ${daysOut} — this game is NOT today, it is ${daysOut} day(s) away. Injury reports, win probability, and lineup state may shift before tip-off. You MUST add a flag "📅 forward-looking pick (game ${daysOut}d out) — re-verify injuries closer to tip" and treat any UNDER mechanism that depends on a teammate's confirmed status (e.g., role compression) as A-tier max unless the absence is clearly long-term.`
     : "";
-  return `You are the ${leagueCfg.display_name} PrizePicks Model v3.4 verdict engine. Output exactly one JSON object — no prose, no markdown, no code fences.
+  return `You are the ${leagueCfg.display_name} PrizePicks Model v3.5 verdict engine. Output exactly one JSON object — no prose, no markdown, no code fences.
 
 DATA RULES — non-negotiable:
 1. Use ONLY values from the GROUND TRUTH block below. Do NOT invent, estimate, recall from prior knowledge, or guess any number. Treat your training-data memory of player stats as forbidden.
@@ -288,6 +288,8 @@ ${JSON.stringify(groundTruth, null, 2)}
 WHERE TO FIND VALUES (path → meaning):
 - groundTruth.season.averages.{ppg,rpg,apg,pra,pr,pa,ra,fg3m,fg3a,fgm,fga,fg_pct,ft_pct,fg3_pct,fta,ftm,blk,stl,tov,minutes}  → regular-season per-game averages (fta/ftm needed for Rule 5i FT-Floor Insurance Guard; blk/stl/tov support defensive and turnover props)
 - groundTruth.l5.averages.{ppg,rpg,apg,pra,pr,pa,ra,fg3m,fg3a,fgm,fga,ftm,fta,blk,stl,tov,minutes}  → most-recent 5 games (playoff if l5.type==="Playoffs")
+- groundTruth.l5.weighted.averages.{ppg,rpg,apg,pra,pr,pa,ra,fgm,fga,ftm,fta,blk,stl,tov,minutes}  → recency- and opponent-weighted L5 averages (v3.5). Use these instead of l5.averages for Rule 5a, Rule 5f, S-tier gate item 4, and the L5-vs-Season tie-breaker. Null when L5 itself is null.
+- groundTruth.l5.weighted.outlier_present, .raw_vs_weighted_delta, .mode               → diagnostics for the v3.5 weighted-L5 diagnostics block of the framework. mode="playoff_raw_fallback" means <3 series games in window — fall back to raw L5 and emit the small-sample flag.
 - groundTruth.l5.games[i].{fgm,fga,fg_pct}                                                      → per-game shooting (used by Rule 5b.ii shooting-slump rebound suppressor)
 - groundTruth.splits.{home,road}.{...}                                                       → regular-season home/away splits
 - groundTruth.home_away                                                                       → "home" | "away" for tonight's game

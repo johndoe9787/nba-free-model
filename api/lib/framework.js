@@ -1,4 +1,4 @@
-// PrizePicks Model v3.4 framework — the rule set Gemini applies to groundTruth.
+// PrizePicks Model v3.5 framework — the rule set Gemini applies to groundTruth.
 // Lives server-side; the frontend never sees or ships it.
 //
 // The framework body is shared across leagues; per-league values (banner,
@@ -23,9 +23,9 @@ function render(leagueCfg) {
     ? "\nWNBA MODE: 40-minute games (vs NBA 48). Per-game stat lines run ~83% of NBA reference values; framework thresholds below are scaled accordingly. Playoff series lengths differ from NBA — see PLAYOFF MODE."
     : "";
 
-  return `You are operating as the ${f.league_name} PrizePicks Model v3.4. Your job is to analyze a player prop bet using the framework below, then return a structured verdict.${leagueNote}
+  return `You are operating as the ${f.league_name} PrizePicks Model v3.5. Your job is to analyze a player prop bet using the framework below, then return a structured verdict.${leagueNote}
 
-=== ${f.league_name} PRIZEPICKS MODEL v3.4 FRAMEWORK ===
+=== ${f.league_name} PRIZEPICKS MODEL v3.5 FRAMEWORK ===
 
 TIERS (v3.4 — advisory rework, B-tier kept):
 - S: 82-90% confidence, playoff 85-90%
@@ -113,7 +113,9 @@ If detail is empty/generic, apply post-injury gate at default A-tier max with no
 [v3.4] HOME/ROAD SPLIT SAMPLE MINIMUM (Rule 3a):
 Treat splits.{home,road} as a structural baseline ONLY when based on 3+ games at that location (splits.{home,road}.games ≥ 3). With fewer than 3 samples, blend the split toward the season average (50/50 weight). Avoids small-sample inflation.
 
-L5 vs Season Average: When L5 and season avg conflict by 3+ pts, L5 governs as baseline.
+L5 vs Season Average (v3.5): The L5 baseline used for Rule 5a, Rule 5f, S-tier gate item 4, and this tie-breaker is groundTruth.l5.weighted.averages when present, otherwise groundTruth.l5.averages. Game-level reads (Rule 5b.ii via l5.games[i].fg_pct) and multi-star compression (Rule 4c) continue to read the raw values. When the chosen L5 baseline and season avg conflict by 3+ pts, L5 governs.
+
+[v3.5] WEIGHTED L5 DIAGNOSTICS: If l5.weighted is present and Math.abs(l5.weighted.averages.ppg - l5.averages.ppg) >= 2, include flag "⚠️ weighted L5 diverges from raw L5 by Xpts — outlier distortion detected" (X = absolute delta rounded to 1 dp). If l5.weighted.outlier_present === true, the OVER buffer in Rule 5a widens from 1.5 to 2.5 pts on this pick and the flag "⚠️ post-outlier window — buffer widened to 2.5 pts" is mandatory. Both flags are independent and may both fire on the same pick. If l5.weighted.mode === "playoff_raw_fallback", emit the flag "⚠️ small playoff sample — weighted L5 deferred to raw L5" and proceed with raw L5 baselines unchanged.
 
 SUPPRESSOR STACKING: Two+ suppressors active = drop one additional tier beyond highest-priority cap (S→A→B→SKIP). When a stack lands at B, the SKIP advisory flag is mandatory.
 

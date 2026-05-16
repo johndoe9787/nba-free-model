@@ -19,6 +19,8 @@ import {
   getTeamInjuries,
 } from "../api/lib/espn.js";
 import { getLeagueConfig } from "../api/lib/league-config.js";
+import { computeWeightedL5 } from "../api/lib/weighted-l5.js";
+import { getOpponentDefense } from "../api/lib/team-defense.js";
 
 function parseArgs(argv) {
   const out = { league: "nba", positional: [] };
@@ -94,6 +96,22 @@ if (info?.team_abbr && games) {
     if (opp) {
       header(`Injuries: ${opp.name}`);
       dump("opponent_injuries", await getTeamInjuries(opp.team_id, { league }));
+
+      header(`Opponent defense: ${opp.abbr}`);
+      const oppDef = await getOpponentDefense(opp.abbr, { league });
+      dump("opponent_defense", oppDef);
+
+      header("Weighted L5 (v3.5)");
+      const seasonForWeighted = await getSeasonAverages(id, { leagueId });
+      const l5ForWeighted = await getLastNGames(id, 5, {
+        seasonType: game.series ? "Playoffs" : "Regular Season",
+        leagueId,
+      });
+      dump("weighted_l5", computeWeightedL5(l5ForWeighted, seasonForWeighted, oppDef, {
+        isPlayoff: !!game.series,
+        seriesGamesPlayed: 0,
+        opponentAbbr: opp.abbr,
+      }));
     }
   } else {
     console.log("No game scheduled for this team today.");
