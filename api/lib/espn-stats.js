@@ -14,23 +14,45 @@ function gamelogBase(league) {
   return `https://site.web.api.espn.com/apis/common/v3/sports/${cfg.espn_sport_path}/athletes`;
 }
 
-// Statistic positions in event.stats[] are defined by the response's `names`
-// array. Hard-coded indices to avoid an extra lookup per event.
-const IDX = {
-  minutes: 0,
-  fgma: 1,        // "FGM-FGA"
-  fg_pct: 2,
-  fg3ma: 3,       // "3PM-3PA"
-  fg3_pct: 4,
-  ftma: 5,        // "FTM-FTA"
-  ft_pct: 6,
-  reb: 7,
-  ast: 8,
-  blk: 9,
-  stl: 10,
-  pf: 11,
-  to: 12,
-  pts: 13,
+// Statistic positions in event.stats[] differ between leagues — ESPN reorders
+// the gamelog columns on the WNBA endpoint (PTS/REB/AST come right after MIN
+// instead of after the shooting block). We hard-code per-league indices
+// because ESPN's WNBA bucket ships no labels array, leaving the layout
+// validator with nothing to check against. If the on-screen ESPN.com gamelog
+// header order ever changes, refresh this map.
+const IDX_BY_LEAGUE = {
+  nba: {
+    minutes: 0,
+    fgma: 1,        // "FGM-FGA"
+    fg_pct: 2,
+    fg3ma: 3,       // "3PM-3PA"
+    fg3_pct: 4,
+    ftma: 5,        // "FTM-FTA"
+    ft_pct: 6,
+    reb: 7,
+    ast: 8,
+    blk: 9,
+    stl: 10,
+    pf: 11,
+    to: 12,
+    pts: 13,
+  },
+  wnba: {
+    minutes: 0,
+    pts: 1,
+    reb: 2,
+    ast: 3,
+    stl: 4,
+    blk: 5,
+    to: 6,
+    fgma: 7,        // "FGM-FGA"
+    fg_pct: 8,
+    fg3ma: 9,       // "3PM-3PA"
+    fg3_pct: 10,
+    ftma: 11,       // "FTM-FTA"
+    ft_pct: 12,
+    pf: 13,
+  },
 };
 
 function endYearFromSeasonLabel(label) {
@@ -62,24 +84,25 @@ function splitFgPair(s) {
   return [m, a];
 }
 
-function parseStatsRow(stats) {
-  const [fgm, fga] = splitFgPair(stats[IDX.fgma]);
-  const [fg3m, fg3a] = splitFgPair(stats[IDX.fg3ma]);
-  const [ftm, fta] = splitFgPair(stats[IDX.ftma]);
+function parseStatsRow(stats, league = "nba") {
+  const idx = IDX_BY_LEAGUE[league] ?? IDX_BY_LEAGUE.nba;
+  const [fgm, fga] = splitFgPair(stats[idx.fgma]);
+  const [fg3m, fg3a] = splitFgPair(stats[idx.fg3ma]);
+  const [ftm, fta] = splitFgPair(stats[idx.ftma]);
   return {
-    minutes: num(stats[IDX.minutes]),
+    minutes: num(stats[idx.minutes]),
     fgm, fga,
-    fg_pct: num(stats[IDX.fg_pct]) / 100,
+    fg_pct: num(stats[idx.fg_pct]) / 100,
     fg3m, fg3a,
-    fg3_pct: num(stats[IDX.fg3_pct]) / 100,
+    fg3_pct: num(stats[idx.fg3_pct]) / 100,
     ftm, fta,
-    ft_pct: num(stats[IDX.ft_pct]) / 100,
-    reb: num(stats[IDX.reb]),
-    ast: num(stats[IDX.ast]),
-    blk: num(stats[IDX.blk]),
-    stl: num(stats[IDX.stl]),
-    tov: num(stats[IDX.to]),
-    pts: num(stats[IDX.pts]),
+    ft_pct: num(stats[idx.ft_pct]) / 100,
+    reb: num(stats[idx.reb]),
+    ast: num(stats[idx.ast]),
+    blk: num(stats[idx.blk]),
+    stl: num(stats[idx.stl]),
+    tov: num(stats[idx.to]),
+    pts: num(stats[idx.pts]),
   };
 }
 
@@ -119,11 +142,18 @@ function flatEvents(bucket) {
 // ESPN's gamelog response carries a column-name array on the season-type
 // bucket (or per category). If they ever reorder or insert a column, the
 // hard-coded IDX positions silently produce wrong averages. Validate the
-// layout matches expectations before trusting parseStatsRow output.
-const EXPECTED_LABELS = [
-  "MIN", "FG", "FG%", "3PT", "3P%", "FT", "FT%",
-  "REB", "AST", "BLK", "STL", "PF", "TO", "PTS",
-];
+// layout matches expectations before trusting parseStatsRow output. ESPN
+// currently ships labels on NBA buckets but omits them on WNBA buckets.
+const EXPECTED_LABELS_BY_LEAGUE = {
+  nba: [
+    "MIN", "FG", "FG%", "3PT", "3P%", "FT", "FT%",
+    "REB", "AST", "BLK", "STL", "PF", "TO", "PTS",
+  ],
+  wnba: [
+    "MIN", "PTS", "REB", "AST", "STL", "BLK", "TO",
+    "FG", "FG%", "3PT", "3P%", "FT", "FT%", "PF",
+  ],
+};
 
 function findLabels(bucket) {
   if (!bucket) return null;
@@ -137,16 +167,17 @@ function findLabels(bucket) {
   return null;
 }
 
-function bucketLayoutOk(bucket) {
+function bucketLayoutOk(bucket, league = "nba") {
+  const expected = EXPECTED_LABELS_BY_LEAGUE[league] ?? EXPECTED_LABELS_BY_LEAGUE.nba;
   const labels = findLabels(bucket);
   if (!labels) return true; // absent — happy path, IDX assumed
-  if (labels.length < EXPECTED_LABELS.length) {
-    console.error(`${logPrefix()}espn gamelog layout diverged: expected >=${EXPECTED_LABELS.length} cols, got ${labels.length}`);
+  if (labels.length < expected.length) {
+    console.error(`${logPrefix()}espn ${league} gamelog layout diverged: expected >=${expected.length} cols, got ${labels.length}`);
     return false;
   }
-  for (let i = 0; i < EXPECTED_LABELS.length; i++) {
-    if (String(labels[i]).toUpperCase() !== EXPECTED_LABELS[i]) {
-      console.error(`${logPrefix()}espn gamelog layout diverged at col ${i}: expected "${EXPECTED_LABELS[i]}", got "${labels[i]}"`);
+  for (let i = 0; i < expected.length; i++) {
+    if (String(labels[i]).toUpperCase() !== expected[i]) {
+      console.error(`${logPrefix()}espn ${league} gamelog layout diverged at col ${i}: expected "${expected[i]}", got "${labels[i]}"`);
       return false;
     }
   }
@@ -160,10 +191,10 @@ export async function getSeasonAverages(athleteId, { season, league = "nba" } = 
   const data = await fetchGamelog(athleteId, endYear, league);
   if (!data) return null;
   const bucket = findBucket(data.seasonTypes, false);
-  if (!bucketLayoutOk(bucket)) return null;
+  if (!bucketLayoutOk(bucket, league)) return null;
   const events = flatEvents(bucket);
   if (!events.length) return null;
-  const rows = events.map((e) => parseStatsRow(e.stats));
+  const rows = events.map((e) => parseStatsRow(e.stats, league));
   const avg = (k) => Number((rows.reduce((s, r) => s + (r[k] || 0), 0) / rows.length).toFixed(2));
   return {
     season: seasonLabelFromEndYear(endYear, league),
@@ -195,14 +226,14 @@ export async function getLastNGames(athleteId, n = 5, { season, postseason = fal
   const data = await fetchGamelog(athleteId, endYear, league);
   if (!data) return null;
   const bucket = findBucket(data.seasonTypes, postseason);
-  if (!bucketLayoutOk(bucket)) return null;
+  if (!bucketLayoutOk(bucket, league)) return null;
   const events = flatEvents(bucket);
   if (!events.length) return null;
 
   const meta = data.events ?? {};
   const enriched = events.map((e) => {
     const m = meta[e.eventId];
-    const row = parseStatsRow(e.stats);
+    const row = parseStatsRow(e.stats, league);
     const oppAbbr = m?.opponent?.abbreviation ?? "?";
     const ownAbbr = m?.team?.abbreviation ?? "";
     const atVs = m?.atVs ?? "vs";
