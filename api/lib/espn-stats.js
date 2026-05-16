@@ -7,8 +7,12 @@
 // where season is the END year of the season label, e.g. 2026 for "2025-26".
 
 import { logPrefix } from "./request-context.js";
+import { getLeagueConfig } from "./league-config.js";
 
-const GAMELOG = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes";
+function gamelogBase(league) {
+  const cfg = getLeagueConfig(league);
+  return `https://site.web.api.espn.com/apis/common/v3/sports/${cfg.espn_sport_path}/athletes`;
+}
 
 // Statistic positions in event.stats[] are defined by the response's `names`
 // array. Hard-coded indices to avoid an extra lookup per event.
@@ -31,13 +35,18 @@ const IDX = {
 
 function endYearFromSeasonLabel(label) {
   if (typeof label === "number") return label;
-  const m = String(label).match(/^(\d{4})-(\d{2})$/);
-  if (!m) return null;
-  const start = Number(m[1]);
-  return start + 1;
+  const str = String(label);
+  // NBA cross-year label: "2025-26" → end year 2026.
+  const cross = str.match(/^(\d{4})-(\d{2})$/);
+  if (cross) return Number(cross[1]) + 1;
+  // WNBA single-year label: "2026" → end year 2026.
+  const single = str.match(/^(\d{4})$/);
+  if (single) return Number(single[1]);
+  return null;
 }
 
-function seasonLabelFromEndYear(endYear) {
+function seasonLabelFromEndYear(endYear, league = "nba") {
+  if (league === "wnba") return String(endYear);
   return `${endYear - 1}-${String(endYear % 100).padStart(2, "0")}`;
 }
 
@@ -81,8 +90,8 @@ function fmtDate(iso) {
   return `${months[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, "0")}, ${d.getUTCFullYear()}`;
 }
 
-async function fetchGamelog(athleteId, endYear) {
-  const url = `${GAMELOG}/${athleteId}/gamelog?season=${endYear}`;
+async function fetchGamelog(athleteId, endYear, league = "nba") {
+  const url = `${gamelogBase(league)}/${athleteId}/gamelog?season=${endYear}`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
@@ -144,11 +153,11 @@ function bucketLayoutOk(bucket) {
   return true;
 }
 
-export async function getSeasonAverages(athleteId, { season } = {}) {
+export async function getSeasonAverages(athleteId, { season, league = "nba" } = {}) {
   if (!athleteId) return null;
   const endYear = endYearFromSeasonLabel(season);
   if (!endYear) return null;
-  const data = await fetchGamelog(athleteId, endYear);
+  const data = await fetchGamelog(athleteId, endYear, league);
   if (!data) return null;
   const bucket = findBucket(data.seasonTypes, false);
   if (!bucketLayoutOk(bucket)) return null;
@@ -157,7 +166,7 @@ export async function getSeasonAverages(athleteId, { season } = {}) {
   const rows = events.map((e) => parseStatsRow(e.stats));
   const avg = (k) => Number((rows.reduce((s, r) => s + (r[k] || 0), 0) / rows.length).toFixed(2));
   return {
-    season: seasonLabelFromEndYear(endYear),
+    season: seasonLabelFromEndYear(endYear, league),
     season_type: "Regular Season",
     games: rows.length,
     minutes: avg("minutes"),
@@ -179,11 +188,11 @@ export async function getSeasonAverages(athleteId, { season } = {}) {
   };
 }
 
-export async function getLastNGames(athleteId, n = 5, { season, postseason = false } = {}) {
+export async function getLastNGames(athleteId, n = 5, { season, postseason = false, league = "nba" } = {}) {
   if (!athleteId) return null;
   const endYear = endYearFromSeasonLabel(season);
   if (!endYear) return null;
-  const data = await fetchGamelog(athleteId, endYear);
+  const data = await fetchGamelog(athleteId, endYear, league);
   if (!data) return null;
   const bucket = findBucket(data.seasonTypes, postseason);
   if (!bucketLayoutOk(bucket)) return null;
@@ -233,7 +242,7 @@ export async function getLastNGames(athleteId, n = 5, { season, postseason = fal
   if (!games.length) return null;
   const avg = (k) => Number((games.reduce((s, g) => s + (g[k] || 0), 0) / games.length).toFixed(2));
   return {
-    season: seasonLabelFromEndYear(endYear),
+    season: seasonLabelFromEndYear(endYear, league),
     season_type: postseason ? "Playoffs" : "Regular Season",
     n: games.length,
     games,

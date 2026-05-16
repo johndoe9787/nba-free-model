@@ -1,13 +1,14 @@
 // End-to-end smoke test that calls live Gemini.
 // Loads GOOGLE_API_KEY from .env.local automatically.
-// Usage: node scripts/smoke-gemini.mjs ["Player"] ["Prop"] [line]
+// Usage: node scripts/smoke-gemini.mjs ["Player"] ["Prop"] [line] [--league wnba]
 
 import {
   gatherGroundTruth,
   buildPrompt,
   propTypeToField,
 } from "../api/analyze.js";
-import { MODEL_FRAMEWORK } from "../api/lib/framework.js";
+import { buildFramework } from "../api/lib/framework.js";
+import { getLeagueConfig } from "../api/lib/league-config.js";
 import { loadEnvLocal } from "./_env.mjs";
 
 loadEnvLocal();
@@ -17,25 +18,46 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const player = process.argv[2] || "Nikola Jokic";
-const propType = process.argv[3] || "PRA OVER";
-const line = process.argv[4] || "40.5";
+function parseArgs(argv) {
+  const out = { league: "nba", positional: [] };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--league") {
+      out.league = String(argv[++i] ?? "nba").toLowerCase();
+    } else {
+      out.positional.push(argv[i]);
+    }
+  }
+  return out;
+}
 
-console.log(`Player: ${player}\nProp:   ${propType}\nLine:   ${line}\n`);
+const parsed = parseArgs(process.argv.slice(2));
+const league = parsed.league;
+const leagueCfg = getLeagueConfig(league);
 
-const gathered = await gatherGroundTruth({ player, propType, line });
+const defaults = league === "wnba"
+  ? { player: "A'ja Wilson", prop: "Points OVER", line: "22.5" }
+  : { player: "Nikola Jokic", prop: "PRA OVER", line: "40.5" };
+
+const player = parsed.positional[0] || defaults.player;
+const propType = parsed.positional[1] || defaults.prop;
+const line = parsed.positional[2] || defaults.line;
+
+console.log(`League: ${leagueCfg.display_name}\nPlayer: ${player}\nProp:   ${propType}\nLine:   ${line}\n`);
+
+const gathered = await gatherGroundTruth({ player, propType, line, league });
 if (gathered.skipReason) {
   console.log(`Orchestrator SKIP: ${gathered.skipReason} — ${gathered.message}`);
   process.exit(0);
 }
-const { groundTruth, missing } = gathered;
+const { groundTruth, missing, trace } = gathered;
+console.log("trace:", trace);
 console.log("missing:", missing);
 if (missing.length) {
   console.log("Orchestrator returns SKIP without calling Gemini.");
   process.exit(0);
 }
 
-const prompt = buildPrompt(MODEL_FRAMEWORK, groundTruth);
+const prompt = buildPrompt(buildFramework(leagueCfg), groundTruth, leagueCfg);
 console.log(`prompt length: ${prompt.length} chars\n`);
 console.log("Calling Gemini...");
 

@@ -1,9 +1,31 @@
-// NBA PrizePicks Model v3.4 framework — the rule set Gemini applies to groundTruth.
+// PrizePicks Model v3.4 framework — the rule set Gemini applies to groundTruth.
 // Lives server-side; the frontend never sees or ships it.
+//
+// The framework body is shared across leagues; per-league values (banner,
+// road deduction, FT-floor baseline, playoff series lengths) are templated
+// in via the leagueCfg passed to buildFramework().
 
-export const MODEL_FRAMEWORK = `You are operating as the NBA PrizePicks Model v3.4. Your job is to analyze a player prop bet using the framework below, then return a structured verdict.
+const cache = new Map();
 
-=== NBA PRIZEPICKS MODEL v3.4 FRAMEWORK ===
+export function buildFramework(leagueCfg) {
+  const key = leagueCfg.league;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const out = render(leagueCfg);
+  cache.set(key, out);
+  return out;
+}
+
+function render(leagueCfg) {
+  const f = leagueCfg.framework;
+  const isWnba = leagueCfg.league === "wnba";
+  const leagueNote = isWnba
+    ? "\nWNBA MODE: 40-minute games (vs NBA 48). Per-game stat lines run ~83% of NBA reference values; framework thresholds below are scaled accordingly. Playoff series lengths differ from NBA — see PLAYOFF MODE."
+    : "";
+
+  return `You are operating as the ${f.league_name} PrizePicks Model v3.4. Your job is to analyze a player prop bet using the framework below, then return a structured verdict.${leagueNote}
+
+=== ${f.league_name} PRIZEPICKS MODEL v3.4 FRAMEWORK ===
 
 TIERS (v3.4 — advisory rework, B-tier kept):
 - S: 82-90% confidence, playoff 85-90%
@@ -11,7 +33,8 @@ TIERS (v3.4 — advisory rework, B-tier kept):
 - B: 62-69% confidence — VERDICT STILL ISSUED, but flags MUST include "⚠️ B-tier confidence band — model recommends SKIP (B-tier hit 29.6% in v3.3 sample)". B-tier is informational; the operator decides.
 - SKIP: <62% confidence or hard-gate failure.
 
-PLAYOFF MODE RULES (active when NBA postseason is ongoing):
+PLAYOFF MODE RULES (active when ${f.league_name} postseason is ongoing):
+- Series structure: first round best-of-${f.playoff_series.first_round}, semis best-of-${f.playoff_series.semis}, conf finals best-of-${f.playoff_series.conf_finals}, finals best-of-${f.playoff_series.finals}.
 - Game 1: VERDICT STILL ISSUED with accurate OVER/UNDER read at the appropriate tier (B-tier max baseline), but flags MUST include "⚠️ Game 1 — model recommends SKIP (Game 1 hit 18.8% in v3.3 sample)". Exception: UNDER via Mechanism 1 (confirmed minutes restriction or rest designation) issued at A-tier max with no SKIP advisory — Mechanism-1 UNDERs are the one Game 1 setup with intact edge.
 - Game 2: A-tier max both directions (hard cap)
 - Game 3+: Standard playoff rules
@@ -28,7 +51,7 @@ HARD GATES (cannot be bypassed):
 - Game 2 hard cap: A-tier max ALL props both directions (playoff only)
 - [v3.4] Rule 5i FT-Floor Insurance Guard: see below — UNDER on Points/PRA invalid when player's FT-protected floor exceeds line.
 
-ROAD DEDUCTION (Rule 5a): Subtract 1.5 pts from season avg and L5 avg before line comparison on road scoring props.
+ROAD DEDUCTION (Rule 5a): Subtract ${f.road_deduction_pts} pts from season avg and L5 avg before line comparison on road scoring props.
 
 OVER BUFFER RULES:
 - Line must be 1.5+ pts BELOW road-adjusted baseline to qualify
@@ -51,11 +74,11 @@ When ALL THREE hold pre-tip — (a) leading team's win_prob ≥ 0.80, (b) opposi
 [v3.4] RULE 5i — FT-FLOOR INSURANCE GUARD (UNDER picks):
 For Points/PRA UNDER on a player with season.averages.fta ≥ 5:
   ft_floor_pts = season.averages.fta × season.averages.ft_pct
-  total_floor  = ft_floor_pts + 8         (8 = worst-case FG floor vs elite D)
+  total_floor  = ft_floor_pts + ${f.ft_floor_fg_baseline}         (${f.ft_floor_fg_baseline} = worst-case FG floor vs elite D)
 - If total_floor ≥ line: UNDER INVALID (regardless of named-defender suppression). Set verdict=SKIP.
 - If total_floor < line - 2: UNDER valid (other 5g mechanism still required).
 - If line - 2 ≤ total_floor < line: UNDER A-tier max, requires Mechanism 1 OR 2 confirmed.
-- Mechanism 1 override: if confirmed minutes restriction R < 30, scale ft_floor_pts × (R / 32) and recompute total_floor.
+- Mechanism 1 override: if confirmed minutes restriction R < ${Math.round(f.game_minutes * 30 / 48)}, scale ft_floor_pts × (R / ${Math.round(f.game_minutes * 32 / 48)}) and recompute total_floor.
 Cross-link: Rule 5h FT-leak modifier widens FG suppression to 20-25% for elite-defender + 5+ FTA players; FT scoring is independent and gated by 5i.
 
 UNDER MECHANISMS (must identify one to issue UNDER; 5i must be cleared first for Points/PRA UNDER):
@@ -103,3 +126,10 @@ S-TIER GATE (ALL must pass):
 6. (Playoff) Game 3+ in series
 
 === END FRAMEWORK ===`;
+}
+
+// Back-compat shim. Existing call sites (smoke-gemini.mjs) import MODEL_FRAMEWORK
+// directly; keep the NBA build available as the default export so the old path
+// still works until those call sites pass leagueCfg explicitly.
+import { getLeagueConfig } from "./league-config.js";
+export const MODEL_FRAMEWORK = buildFramework(getLeagueConfig("nba"));

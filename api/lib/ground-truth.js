@@ -8,6 +8,7 @@ export function composeGroundTruth({
   player,
   propType,
   line,
+  league = "nba",
   info,           // commonPlayerInfo (NBA stats)
   game,           // ESPN game (or null)
   daysOut = 0,   // 0 = today, 1+ = upcoming game found via lookahead
@@ -21,7 +22,7 @@ export function composeGroundTruth({
   primaryDefender, // { player, defender_id, share_pct, n_games, total_poss, confirmed, source } | null
 }) {
   const playerAbbr = info?.team_abbr ?? null;
-  const playerEspnAbbr = toEspnAbbr(playerAbbr);
+  const playerEspnAbbr = toEspnAbbr(playerAbbr, league);
 
   const homeAway = (playerEspnAbbr && game)
     ? (game.home.abbr === playerEspnAbbr ? "home"

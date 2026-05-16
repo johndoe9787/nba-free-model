@@ -7,18 +7,17 @@
 // insufficient signal so the orchestrator never hard-fails on this lookup.
 
 import { nbaFetch, rowToObj, findResultSet } from "./nba-http.js";
-import { currentSeason } from "./nba-stats.js";
+import { currentSeasonForLeague } from "./nba-stats.js";
+import { getLeagueConfig } from "./league-config.js";
 
-const TEAM_ID_BY_ABBR = {
-  ATL: 1610612737, BOS: 1610612738, CLE: 1610612739, NOP: 1610612740,
-  CHI: 1610612741, DAL: 1610612742, DEN: 1610612743, GSW: 1610612744,
-  HOU: 1610612745, LAC: 1610612746, LAL: 1610612747, MIA: 1610612748,
-  MIL: 1610612749, MIN: 1610612750, BKN: 1610612751, NYK: 1610612752,
-  ORL: 1610612753, IND: 1610612754, PHI: 1610612755, PHX: 1610612756,
-  POR: 1610612757, SAC: 1610612758, SAS: 1610612759, OKC: 1610612760,
-  TOR: 1610612761, UTA: 1610612762, MEM: 1610612763, WAS: 1610612764,
-  DET: 1610612765, CHA: 1610612766,
-};
+function teamIdByAbbrFor(league) {
+  const cfg = getLeagueConfig(league);
+  const out = {};
+  for (const [id, abbr] of Object.entries(cfg.team_id_to_abbr)) {
+    out[abbr] = Number(id);
+  }
+  return out;
+}
 
 // Thresholds — tuned to pre-empt single-possession noise without demanding
 // share levels that real rotation defenses rarely produce.
@@ -32,13 +31,13 @@ const MIN_GAMES = 2;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const cache = new Map();
 
-function cacheKey(offPlayerId, defTeamId, season, seasonType) {
-  return `${offPlayerId}:${defTeamId}:${season}:${seasonType}`;
+function cacheKey(offPlayerId, defTeamId, season, seasonType, leagueId) {
+  return `${leagueId}:${offPlayerId}:${defTeamId}:${season}:${seasonType}`;
 }
 
-function fetchMatchups({ offPlayerId, defTeamId, season, seasonType }) {
+function fetchMatchups({ offPlayerId, defTeamId, season, seasonType, leagueId }) {
   return nbaFetch("leagueseasonmatchups", {
-    LeagueID: "00",
+    LeagueID: leagueId,
     PerMode: "Totals",
     Season: season,
     SeasonType: seasonType,
@@ -82,26 +81,34 @@ function pickTopDefender(payload, { proxy = false }) {
 // returns no rows (typical in Game 1/2 of a series). The fallback is tagged
 // in the source so the framework can apply lighter weight if desired.
 export async function getPrimaryDefender(playerId, oppAbbr, {
-  season = currentSeason(),
+  season,
   seasonType = "Regular Season",
+  league = "nba",
+  leagueId,
 } = {}) {
   if (!playerId || !oppAbbr) return null;
-  const defTeamId = TEAM_ID_BY_ABBR[String(oppAbbr).toUpperCase()];
+  const resolvedLeagueId = leagueId ?? getLeagueConfig(league).stats_league_id;
+  const teamIdByAbbr = teamIdByAbbrFor(league);
+  const defTeamId = teamIdByAbbr[String(oppAbbr).toUpperCase()];
   if (!defTeamId) return null;
+  const seasonLabel = season ?? currentSeasonForLeague(resolvedLeagueId);
 
-  const key = cacheKey(playerId, defTeamId, season, seasonType);
+  const key = cacheKey(playerId, defTeamId, seasonLabel, seasonType, resolvedLeagueId);
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const primary = await fetchMatchups({ offPlayerId: playerId, defTeamId, season, seasonType });
+  const primary = await fetchMatchups({
+    offPlayerId: playerId, defTeamId, season: seasonLabel, seasonType, leagueId: resolvedLeagueId,
+  });
   let result = pickTopDefender(primary, { proxy: false });
 
   if (!result && seasonType === "Playoffs") {
     const proxy = await fetchMatchups({
       offPlayerId: playerId,
       defTeamId,
-      season,
+      season: seasonLabel,
       seasonType: "Regular Season",
+      leagueId: resolvedLeagueId,
     });
     result = pickTopDefender(proxy, { proxy: true });
   }

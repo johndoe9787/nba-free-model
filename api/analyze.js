@@ -1,6 +1,6 @@
 import { resolvePlayerId, resolveEspnId } from "./lib/player-ids.js";
 import {
-  currentSeason,
+  currentSeasonForLeague,
   getCommonPlayerInfo,
   getSeasonAverages,
   getLastNGames,
@@ -19,7 +19,8 @@ import {
   opponentFor,
 } from "./lib/espn.js";
 import { composeGroundTruth } from "./lib/ground-truth.js";
-import { MODEL_FRAMEWORK } from "./lib/framework.js";
+import { buildFramework } from "./lib/framework.js";
+import { getLeagueConfig, isValidLeague } from "./lib/league-config.js";
 import { rateLimit } from "./lib/rate-limit.js";
 import { runWithRequestContext } from "./lib/request-context.js";
 import { randomUUID } from "node:crypto";
@@ -28,30 +29,32 @@ export const runtime = "nodejs";
 
 // Exported for smoke testing — fetches real data and composes groundTruth
 // without calling Gemini.
-export async function gatherGroundTruth({ player, propType, line }) {
-  const playerId = resolvePlayerId(player);
+export async function gatherGroundTruth({ player, propType, line, league = "nba" }) {
+  const leagueCfg = getLeagueConfig(league);
+  const leagueId = leagueCfg.stats_league_id;
+  const playerId = resolvePlayerId(player, { league });
   if (!playerId) {
     return { skipReason: "player_not_configured", message: `No PlayerID configured for ${player}` };
   }
 
-  const season = currentSeason();
-  const espnId = resolveEspnId(player);
+  const season = currentSeasonForLeague(leagueId);
+  const espnId = resolveEspnId(player, { league });
 
   const [nbaInfo, games, allInjuries] = await Promise.all([
-    getCommonPlayerInfo(playerId),
-    getTodaysGames(),
-    getAllInjuries(),
+    getCommonPlayerInfo(playerId, { leagueId }),
+    getTodaysGames(undefined, { league }),
+    getAllInjuries({ league }),
   ]);
 
   if (!games) return { skipReason: "schedule_unavailable", message: "Could not fetch ESPN scoreboard" };
 
-  // Identity: stats.nba.com primary, balldontlie fallback (free-tier OK).
-  // Only team_abbr is strictly required downstream.
+  // Identity: stats.nba.com primary, balldontlie fallback (NBA only — bdl has
+  // no WNBA coverage and short-circuits on league==="wnba").
   let info = nbaInfo;
   if (!info) {
-    const bdlPlayer = await bdl.findPlayer(player);
+    const bdlPlayer = await bdl.findPlayer(player, { league });
     if (!bdlPlayer || !bdlPlayer.team_abbr) {
-      return { skipReason: "player_lookup_failed", message: `Could not resolve ${player} via stats.nba.com or balldontlie` };
+      return { skipReason: "player_lookup_failed", message: `Could not resolve ${player} via stats.nba.com${league === "nba" ? " or balldontlie" : ""}` };
     }
     info = {
       player_id: playerId,
@@ -63,15 +66,16 @@ export async function gatherGroundTruth({ player, propType, line }) {
   }
 
   const trace = {
+    league,
     scoreboard: "espn",
     injuries: allInjuries ? "espn" : "missing",
     info: nbaInfo ? "nba_stats" : (info !== nbaInfo ? "balldontlie" : "missing"),
   };
 
-  let game = findGameForTeamAbbr(games, info.team_abbr);
+  let game = findGameForTeamAbbr(games, info.team_abbr, { league });
   let daysOut = 0;
   if (!game) {
-    const next = await findNextGameForTeamAbbr(info.team_abbr, 7);
+    const next = await findNextGameForTeamAbbr(info.team_abbr, 7, { league });
     if (!next) return { skipReason: "no_upcoming_game", message: `${info.team_name ?? info.team_abbr} has no game in the next 7 days` };
     game = next.game;
     daysOut = next.days_out;
@@ -80,42 +84,45 @@ export async function gatherGroundTruth({ player, propType, line }) {
 
   // Season type is decided by the ESPN scoreboard event, not by which gamelog
   // tier returned data. Otherwise a transient playoff-tier failure would
-  // silently mislabel a playoff game as regular season.
-  const isPlayoff = !!(game.series || game.round);
+  // silently mislabel a playoff game as regular season. `series` is the
+  // authoritative marker — ESPN attaches a {type:"playoff", ...} object only
+  // to playoff events. `round` is unreliable across leagues (NBA uses QTR,
+  // WNBA uses STD for regular season, etc.) so we ignore it here.
+  const isPlayoff = !!game.series;
   const seasonType = isPlayoff ? "Playoffs" : "Regular Season";
-  let l5 = await getLastNGames(playerId, 5, { seasonType });
+  let l5 = await getLastNGames(playerId, 5, { seasonType, leagueId });
   trace.l5 = l5?.games?.length ? "nba_stats" : null;
   if (!trace.l5) {
-    l5 = await espnStats.getLastNGames(espnId, 5, { season, postseason: isPlayoff });
+    l5 = await espnStats.getLastNGames(espnId, 5, { season, postseason: isPlayoff, league });
     trace.l5 = l5?.games?.length ? "espn_gamelog" : "missing";
   }
 
   // Splits and opponent defense use regular season — playoff samples are too
   // small (5–28 games) to be a stable baseline. Same logic as Rule 5a road
   // deduction.
-  const opponentSide = opponentFor(game, info.team_abbr);
+  const opponentSide = opponentFor(game, info.team_abbr, { league });
   const [nbaSeasonAvg, splits, winProb, opponentDefense, primaryDefender] = await Promise.all([
-    getSeasonAverages(playerId, { seasonType: "Regular Season" }),
-    getHomeAwaySplits(playerId, { seasonType: "Regular Season" }),
-    getWinProbability(game.game_id, game.competition_id),
-    opponentSide ? getOpponentDefense(opponentSide.abbr, { seasonType: "Regular Season" }) : null,
-    opponentSide ? getPrimaryDefender(playerId, opponentSide.abbr, { seasonType }) : null,
+    getSeasonAverages(playerId, { seasonType: "Regular Season", leagueId }),
+    getHomeAwaySplits(playerId, { seasonType: "Regular Season", leagueId }),
+    getWinProbability(game.game_id, game.competition_id, { league }),
+    opponentSide ? getOpponentDefense(opponentSide.abbr, { seasonType: "Regular Season", league }) : null,
+    opponentSide ? getPrimaryDefender(playerId, opponentSide.abbr, { seasonType, league }) : null,
   ]);
   trace.splits = splits ? "nba_stats" : "missing";
   trace.win_prob = winProb ? `espn_${winProb.source}` : "missing";
   trace.opponent_defense = opponentDefense ? `team_defense_${opponentDefense.source}` : "missing";
   trace.primary_defender = primaryDefender ? primaryDefender.source : "missing";
 
-  const seasonAvg = nbaSeasonAvg ?? await espnStats.getSeasonAverages(espnId, { season });
+  const seasonAvg = nbaSeasonAvg ?? await espnStats.getSeasonAverages(espnId, { season, league });
   trace.season_avg = nbaSeasonAvg ? "nba_stats" : (seasonAvg ? "espn_gamelog" : "missing");
 
   const { groundTruth, missing } = composeGroundTruth({
-    player, propType, line,
+    player, propType, line, league,
     info, game, daysOut, seasonType,
     seasonAvg, l5, splits, winProb, allInjuries, opponentDefense, primaryDefender,
   });
 
-  return { groundTruth, missing, trace };
+  return { groundTruth, missing, trace, leagueCfg };
 }
 
 export async function POST(req) {
@@ -136,9 +143,14 @@ async function handlePost(req) {
 
     const body = await req.json();
     const { player, propType, line } = body;
+    const league = (body.league ?? "nba").toLowerCase();
 
     if (!player || !propType || !line) {
       return Response.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    if (!isValidLeague(league)) {
+      return Response.json({ error: `Unknown league: "${league}". Supported: nba, wnba` }, { status: 400 });
     }
 
     if (!/\s+(OVER|UNDER)\s*$/i.test(propType) || propTypeToField(propType) == null) {
@@ -150,13 +162,13 @@ async function handlePost(req) {
       );
     }
 
-    const gathered = await gatherGroundTruth({ player, propType, line });
+    const gathered = await gatherGroundTruth({ player, propType, line, league });
 
     if (gathered.skipReason) {
       return Response.json(skipResult(gathered.skipReason, gathered.message));
     }
 
-    const { groundTruth, missing, trace } = gathered;
+    const { groundTruth, missing, trace, leagueCfg } = gathered;
 
     if (missing.length > 0) {
       const traceFlags = Object.entries(trace || {})
@@ -178,7 +190,7 @@ async function handlePost(req) {
       return Response.json({ error: "Google API key not configured" }, { status: 500 });
     }
 
-    const prompt = buildPrompt(MODEL_FRAMEWORK, groundTruth);
+    const prompt = buildPrompt(buildFramework(leagueCfg), groundTruth, leagueCfg);
     const llm = await callGemini(googleKey, prompt);
     if (llm.error) {
       return Response.json({ error: llm.error, debug: llm.debug }, { status: 500 });
@@ -228,13 +240,13 @@ export function propTypeToField(propType) {
   return PROP_TO_FIELD[stat] ?? null;
 }
 
-export function buildPrompt(framework, groundTruth) {
+export function buildPrompt(framework, groundTruth, leagueCfg = getLeagueConfig("nba")) {
   const field = propTypeToField(groundTruth.prop_type);
   const daysOut = groundTruth.game?.days_out ?? 0;
   const forwardLookingNote = daysOut > 0
     ? `\n\nFORWARD-LOOKING GAME: groundTruth.game.days_out is ${daysOut} — this game is NOT today, it is ${daysOut} day(s) away. Injury reports, win probability, and lineup state may shift before tip-off. You MUST add a flag "📅 forward-looking pick (game ${daysOut}d out) — re-verify injuries closer to tip" and treat any UNDER mechanism that depends on a teammate's confirmed status (e.g., role compression) as A-tier max unless the absence is clearly long-term.`
     : "";
-  return `You are the NBA PrizePicks Model v3.4 verdict engine. Output exactly one JSON object — no prose, no markdown, no code fences.
+  return `You are the ${leagueCfg.display_name} PrizePicks Model v3.4 verdict engine. Output exactly one JSON object — no prose, no markdown, no code fences.
 
 DATA RULES — non-negotiable:
 1. Use ONLY values from the GROUND TRUTH block below. Do NOT invent, estimate, recall from prior knowledge, or guess any number. Treat your training-data memory of player stats as forbidden.
