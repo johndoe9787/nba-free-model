@@ -240,3 +240,22 @@ export async function getTeamInjuries(teamId, { league = "nba" } = {}) {
   const group = all.find((g) => g.team_id === id);
   return group?.injuries ?? [];
 }
+
+// Identity fallback for when stats.nba.com / stats.wnba.com commonplayerinfo
+// is blocked or 5xx. Returns team_abbr in the stats.nba.com convention (via
+// toNbaAbbr) so downstream callers don't need to know we sourced it from ESPN.
+export async function getAthleteIdentity(espnId, { league = "nba" } = {}) {
+  if (!espnId) return null;
+  const cfg = getLeagueConfig(league);
+  const url = `https://site.web.api.espn.com/apis/common/v3/sports/${cfg.espn_sport_path}/athletes/${espnId}`;
+  const data = await jsonFetch(url);
+  const ath = data?.athlete;
+  const espnAbbr = ath?.team?.abbreviation;
+  if (!espnAbbr) return null;
+  return {
+    full_name: ath.displayName ?? ath.fullName ?? null,
+    team_id: ath.team?.id ?? null,
+    team_name: ath.team?.displayName ?? ath.team?.name ?? null,
+    team_abbr: toNbaAbbr(espnAbbr, league),
+  };
+}

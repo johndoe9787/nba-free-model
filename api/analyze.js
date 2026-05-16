@@ -16,6 +16,7 @@ import {
   findNextGameForTeamAbbr,
   getWinProbability,
   getAllInjuries,
+  getAthleteIdentity,
   opponentFor,
 } from "./lib/espn.js";
 import { composeGroundTruth } from "./lib/ground-truth.js";
@@ -48,25 +49,44 @@ export async function gatherGroundTruth({ player, propType, line, league = "nba"
 
   if (!games) return { skipReason: "schedule_unavailable", message: "Could not fetch ESPN scoreboard" };
 
-  // Identity: stats.nba.com primary, balldontlie fallback (NBA only — bdl has
-  // no WNBA coverage and short-circuits on league==="wnba").
+  // Identity cascade: stats.nba.com → balldontlie (NBA only, bdl short-circuits
+  // on WNBA) → ESPN athletes. The ESPN tier closes a gap that previously caused
+  // "could not resolve" SKIPs whenever stats.wnba.com had a transient blip, since
+  // balldontlie has no WNBA coverage.
   let info = nbaInfo;
+  let infoSource = nbaInfo ? "nba_stats" : null;
   if (!info) {
     const bdlPlayer = await bdl.findPlayer(player, { league });
-    if (!bdlPlayer || !bdlPlayer.team_abbr) {
-      const host = league === "wnba" ? "stats.wnba.com" : "stats.nba.com";
-      const fallback = league === "nba" ? " or balldontlie" : "";
-      return {
-        skipReason: "player_lookup_failed",
-        message: `Could not resolve ${player} via ${host}${fallback} — likely a transient upstream failure, try again.`,
+    if (bdlPlayer?.team_abbr) {
+      info = {
+        player_id: playerId,
+        full_name: bdlPlayer.full_name,
+        team_id: null,
+        team_name: bdlPlayer.team_name,
+        team_abbr: bdlPlayer.team_abbr,
       };
+      infoSource = "balldontlie";
     }
-    info = {
-      player_id: playerId,
-      full_name: bdlPlayer.full_name,
-      team_id: null,
-      team_name: bdlPlayer.team_name,
-      team_abbr: bdlPlayer.team_abbr,
+  }
+  if (!info && espnId) {
+    const espnIdentity = await getAthleteIdentity(espnId, { league });
+    if (espnIdentity?.team_abbr) {
+      info = {
+        player_id: playerId,
+        full_name: espnIdentity.full_name,
+        team_id: espnIdentity.team_id,
+        team_name: espnIdentity.team_name,
+        team_abbr: espnIdentity.team_abbr,
+      };
+      infoSource = "espn_athlete";
+    }
+  }
+  if (!info) {
+    const host = league === "wnba" ? "stats.wnba.com" : "stats.nba.com";
+    const fallback = league === "nba" ? " or balldontlie" : "";
+    return {
+      skipReason: "player_lookup_failed",
+      message: `Could not resolve ${player} via ${host}${fallback} or ESPN — likely a transient upstream failure, try again.`,
     };
   }
 
@@ -74,7 +94,7 @@ export async function gatherGroundTruth({ player, propType, line, league = "nba"
     league,
     scoreboard: "espn",
     injuries: allInjuries ? "espn" : "missing",
-    info: nbaInfo ? "nba_stats" : (info !== nbaInfo ? "balldontlie" : "missing"),
+    info: infoSource ?? "missing",
   };
 
   let game = findGameForTeamAbbr(games, info.team_abbr, { league });
