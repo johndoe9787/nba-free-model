@@ -1,6 +1,10 @@
 // stats.nba.com client. Vercel serverless IPs are sometimes 403'd by the
 // NBA stats edge — every helper returns null on failure so the orchestrator
 // can surface a missing-data SKIP rather than crash.
+//
+// LeagueID convention at stats.nba.com: "00" = NBA, "10" = WNBA. Every public
+// helper here accepts a `leagueId` option (default "00") so the same client
+// serves both leagues.
 
 import { nbaFetch, rowToObj, findResultSet } from "./nba-http.js";
 
@@ -12,6 +16,16 @@ export function currentSeason(date = new Date()) {
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
 }
 
+// WNBA seasons are single calendar years (May → Oct). stats.nba.com expects
+// just "YYYY" for LeagueID=10, not the NBA's cross-year "YYYY-YY" label.
+export function currentWnbaSeason(date = new Date()) {
+  return String(date.getUTCFullYear());
+}
+
+export function currentSeasonForLeague(leagueId, date = new Date()) {
+  return leagueId === "10" ? currentWnbaSeason(date) : currentSeason(date);
+}
+
 // Concurrent in-flight de-dupe for playerdashboardbygeneralsplits — the
 // season-averages and home/road-splits helpers both extract from the same
 // payload, and the orchestrator fires them in parallel. Without this they'd
@@ -19,16 +33,17 @@ export function currentSeason(date = new Date()) {
 // entry clears, so a later, separate request still re-fetches.
 const dashInflight = new Map();
 
-function dashboardKey(playerId, season, seasonType) {
-  return `${playerId}:${season}:${seasonType}`;
+function dashboardKey(playerId, season, seasonType, leagueId) {
+  return `${leagueId}:${playerId}:${season}:${seasonType}`;
 }
 
-async function fetchPlayerDashboard(playerId, season, seasonType) {
-  const key = dashboardKey(playerId, season, seasonType);
+async function fetchPlayerDashboard(playerId, season, seasonType, leagueId) {
+  const key = dashboardKey(playerId, season, seasonType, leagueId);
   let p = dashInflight.get(key);
   if (!p) {
     p = nbaFetch("playerdashboardbygeneralsplits", {
       ...DASH_DEFAULTS,
+      LeagueID: leagueId,
       PlayerID: playerId,
       Season: season,
       SeasonType: seasonType,
@@ -84,26 +99,30 @@ function pickAverages(row) {
 }
 
 export async function getSeasonAverages(playerId, {
-  season = currentSeason(),
+  season,
   seasonType = "Regular Season",
+  leagueId = "00",
 } = {}) {
   if (!playerId) return null;
-  const data = await fetchPlayerDashboard(playerId, season, seasonType);
+  const seasonLabel = season ?? currentSeasonForLeague(leagueId);
+  const data = await fetchPlayerDashboard(playerId, seasonLabel, seasonType, leagueId);
   const rs = findResultSet(data, "OverallPlayerDashboard");
   if (!rs?.rowSet?.length) return null;
   return {
-    season,
+    season: seasonLabel,
     season_type: seasonType,
     ...pickAverages(rowToObj(rs.headers, rs.rowSet[0])),
   };
 }
 
 export async function getHomeAwaySplits(playerId, {
-  season = currentSeason(),
+  season,
   seasonType = "Regular Season",
+  leagueId = "00",
 } = {}) {
   if (!playerId) return null;
-  const data = await fetchPlayerDashboard(playerId, season, seasonType);
+  const seasonLabel = season ?? currentSeasonForLeague(leagueId);
+  const data = await fetchPlayerDashboard(playerId, seasonLabel, seasonType, leagueId);
   const rs = findResultSet(data, "LocationPlayerDashboard");
   if (!rs?.rowSet?.length) return null;
   const out = { home: null, road: null };
@@ -116,15 +135,17 @@ export async function getHomeAwaySplits(playerId, {
 }
 
 export async function getLastNGames(playerId, n = 5, {
-  season = currentSeason(),
+  season,
   seasonType = "Regular Season",
+  leagueId = "00",
 } = {}) {
   if (!playerId) return null;
+  const seasonLabel = season ?? currentSeasonForLeague(leagueId);
   const data = await nbaFetch("playergamelog", {
     PlayerID: playerId,
-    Season: season,
+    Season: seasonLabel,
     SeasonType: seasonType,
-    LeagueID: "00",
+    LeagueID: leagueId,
     DateFrom: "",
     DateTo: "",
   });
@@ -158,7 +179,7 @@ export async function getLastNGames(playerId, n = 5, {
   const avg = (key) =>
     games.reduce((s, g) => s + (g[key] ?? 0), 0) / games.length;
   return {
-    season,
+    season: seasonLabel,
     season_type: seasonType,
     n: games.length,
     games,
@@ -181,30 +202,22 @@ export async function getLastNGames(playerId, n = 5, {
   };
 }
 
-// Map NBA team_id → 3-letter abbreviation. Same source of truth as the
-// refresh script. Used to key the league-defense map by abbreviation so
-// callers can look up by opponent's abbr.
-const NBA_TEAM_ID_TO_ABBR = {
-  1610612737: "ATL", 1610612738: "BOS", 1610612739: "CLE", 1610612740: "NOP",
-  1610612741: "CHI", 1610612742: "DAL", 1610612743: "DEN", 1610612744: "GSW",
-  1610612745: "HOU", 1610612746: "LAC", 1610612747: "LAL", 1610612748: "MIA",
-  1610612749: "MIL", 1610612750: "MIN", 1610612751: "BKN", 1610612752: "NYK",
-  1610612753: "ORL", 1610612754: "IND", 1610612755: "PHI", 1610612756: "PHX",
-  1610612757: "POR", 1610612758: "SAC", 1610612759: "SAS", 1610612760: "OKC",
-  1610612761: "TOR", 1610612762: "UTA", 1610612763: "MEM", 1610612764: "WAS",
-  1610612765: "DET", 1610612766: "CHA",
-};
-
-// Returns { <NBA_ABBR>: { team_id, team_name, def_rating, def_rank } } for
-// all 30 teams, or null on failure. Rank 1 = best defense (lowest DEF_RATING).
+// Returns { <ABBR>: { team_id, team_name, def_rating, def_rank } } keyed by
+// abbreviation, or null on failure. Rank 1 = best defense (lowest DEF_RATING).
+// `teamIdToAbbr` comes from league-config so the same code serves both leagues.
 export async function getLeagueTeamDefense({
-  season = currentSeason(),
+  season,
   seasonType = "Regular Season",
+  leagueId = "00",
+  teamIdToAbbr,
 } = {}) {
+  if (!teamIdToAbbr) throw new Error("getLeagueTeamDefense requires teamIdToAbbr");
+  const seasonLabel = season ?? currentSeasonForLeague(leagueId);
   const data = await nbaFetch("leaguedashteamstats", {
     ...DASH_DEFAULTS,
+    LeagueID: leagueId,
     MeasureType: "Advanced",
-    Season: season,
+    Season: seasonLabel,
     SeasonType: seasonType,
   });
   const rs = findResultSet(data, "LeagueDashTeamStats");
@@ -223,7 +236,7 @@ export async function getLeagueTeamDefense({
   rows.sort((a, b) => a.def_rating - b.def_rating);
   const out = {};
   rows.forEach((r, i) => {
-    const abbr = NBA_TEAM_ID_TO_ABBR[r.team_id];
+    const abbr = teamIdToAbbr[r.team_id];
     if (!abbr) return;
     out[abbr] = {
       team_id: r.team_id,
@@ -235,11 +248,11 @@ export async function getLeagueTeamDefense({
   return out;
 }
 
-export async function getCommonPlayerInfo(playerId) {
+export async function getCommonPlayerInfo(playerId, { leagueId = "00" } = {}) {
   if (!playerId) return null;
   const data = await nbaFetch("commonplayerinfo", {
     PlayerID: playerId,
-    LeagueID: "00",
+    LeagueID: leagueId,
   });
   const rs = findResultSet(data, "CommonPlayerInfo");
   if (!rs?.rowSet?.length) return null;

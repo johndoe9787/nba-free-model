@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "refresh-players": "node scripts/refresh-playoff-players.mjs",
-    "refresh-team-defense": "node scripts/refresh-team-defense.mjs"
+    "refresh-team-defense": "node scripts/refresh-team-defense.mjs",
+    "refresh-wnba-players": "node scripts/refresh-wnba-players.mjs",
+    "refresh-wnba-team-defense": "node scripts/refresh-wnba-team-defense.mjs"
   },
   "dependencies": {
     "react": "^19.2.5",

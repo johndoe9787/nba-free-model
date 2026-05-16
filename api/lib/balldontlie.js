@@ -84,7 +84,11 @@ function normName(s) {
   return normalize(s.replace(SUFFIX_RE, ""));
 }
 
-export async function findPlayer(name) {
+export async function findPlayer(name, { league = "nba" } = {}) {
+  // balldontlie has no WNBA coverage. Surface null so the orchestrator emits
+  // a clean player_lookup_failed SKIP rather than fuzzy-matching against the
+  // NBA player table.
+  if (league === "wnba") return null;
   if (playerCache.has(name)) return playerCache.get(name);
   const stripped = name.replace(SUFFIX_RE, "").trim();
   const hasSuffix = stripped !== name.trim();
@@ -125,8 +129,9 @@ export async function findPlayer(name) {
   return result;
 }
 
-export async function getSeasonAverages(playerName, { season } = {}) {
-  const player = await findPlayer(playerName);
+export async function getSeasonAverages(playerName, { season, league = "nba" } = {}) {
+  if (league === "wnba") return null;
+  const player = await findPlayer(playerName, { league });
   if (!player) return null;
   const startYear = seasonStartYear(season);
   if (!startYear) return null;
@@ -156,8 +161,9 @@ export async function getSeasonAverages(playerName, { season } = {}) {
   };
 }
 
-export async function getLastNGames(playerName, n = 5, { season, postseason = false } = {}) {
-  const player = await findPlayer(playerName);
+export async function getLastNGames(playerName, n = 5, { season, postseason = false, league = "nba" } = {}) {
+  if (league === "wnba") return null;
+  const player = await findPlayer(playerName, { league });
   if (!player) return null;
   const startYear = seasonStartYear(season);
   if (!startYear) return null;

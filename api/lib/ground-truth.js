@@ -3,11 +3,13 @@
 // No fetches here.
 
 import { toEspnAbbr } from "./espn.js";
+import { computeWeightedL5, matchesOpponent } from "./weighted-l5.js";
 
 export function composeGroundTruth({
   player,
   propType,
   line,
+  league = "nba",
   info,           // commonPlayerInfo (NBA stats)
   game,           // ESPN game (or null)
   daysOut = 0,   // 0 = today, 1+ = upcoming game found via lookahead
@@ -21,7 +23,7 @@ export function composeGroundTruth({
   primaryDefender, // { player, defender_id, share_pct, n_games, total_poss, confirmed, source } | null
 }) {
   const playerAbbr = info?.team_abbr ?? null;
-  const playerEspnAbbr = toEspnAbbr(playerAbbr);
+  const playerEspnAbbr = toEspnAbbr(playerAbbr, league);
 
   const homeAway = (playerEspnAbbr && game)
     ? (game.home.abbr === playerEspnAbbr ? "home"
@@ -83,6 +85,11 @@ export function composeGroundTruth({
       n: l5.n,
       games: l5.games,
       averages: enrichL5Averages(l5.averages),
+      weighted: computeWeightedL5(l5, seasonAvg, opponentDefense, {
+        isPlayoff: seasonType === "Playoffs",
+        seriesGamesPlayed: series?.games_played ?? 0,
+        opponentAbbr: opponentSide?.abbr ?? null,
+      }),
     } : null,
     splits: splits ? {
       home: splits.home ? pickAverages(splits.home) : null,
@@ -234,16 +241,8 @@ function buildSeriesState({ game, playerSide, opponentSide, l5, seasonType }) {
   return null;
 }
 
-// NBA team abbreviations are unique 3-letter strings, so we anchor the match
-// to a word boundary on each side of the opponent abbr to avoid the rare
-// risk of a substring overlap (e.g. an unrelated 3-letter sequence inside
-// a future schema change).
 function deriveSeriesFromL5(games, oppAbbr) {
-  const upper = oppAbbr.toUpperCase();
-  const re = new RegExp(`(^|[^A-Z])${upper}([^A-Z]|$)`);
-  const vs = games.filter(
-    (g) => g.matchup && re.test(g.matchup.toUpperCase())
-  );
+  const vs = games.filter((g) => matchesOpponent(g.matchup, oppAbbr));
   let pw = 0, ow = 0;
   for (const g of vs) {
     if (g.result === "W") pw++;

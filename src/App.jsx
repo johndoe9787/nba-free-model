@@ -1,7 +1,11 @@
 import { useState, useCallback, useMemo } from "react";
-import playersData from "../data/players.json";
+import nbaPlayersData from "../data/players.json";
+import wnbaPlayersData from "../data/players-wnba.json";
 
-const NBA_PLAYERS = Object.keys(playersData);
+const PLAYERS_BY_LEAGUE = {
+  nba: Object.keys(nbaPlayersData).sort(),
+  wnba: Object.keys(wnbaPlayersData).sort(),
+};
 
 const STATS = [
   "Points", "Rebounds", "Assists", "PRA", "PR", "PA", "RA",
@@ -11,6 +15,10 @@ const STATS = [
   "Blocks", "Steals", "Turnovers",
 ];
 const DIRECTIONS = ["Over", "Under"];
+const LEAGUES = [
+  { id: "nba", label: "NBA" },
+  { id: "wnba", label: "WNBA" },
+];
 
 const TIER_CONFIG = {
   S: { color: "#FFD700", bg: "#2a2200", label: "S-TIER", glow: "0 0 20px #FFD70066" },
@@ -24,8 +32,6 @@ const VERDICT_CONFIG = {
   UNDER: { color: "#FF6644", symbol: "▼" },
   SKIP: { color: "#888888", symbol: "✕" },
 };
-
-const SORTED_PLAYERS = [...NBA_PLAYERS].sort();
 
 const selectStyle = {
   background: "#0a1420",
@@ -42,6 +48,7 @@ const selectStyle = {
 };
 
 export default function App() {
+  const [league, setLeague] = useState("nba");
   const [player, setPlayer] = useState("");
   const [stat, setStat] = useState("");
   const [direction, setDirection] = useState("");
@@ -54,11 +61,24 @@ export default function App() {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [playerHighlight, setPlayerHighlight] = useState(0);
 
+  const sortedPlayers = PLAYERS_BY_LEAGUE[league];
+
   const filteredPlayers = useMemo(() => {
     const q = playerQuery.trim().toLowerCase();
-    if (!q) return SORTED_PLAYERS;
-    return SORTED_PLAYERS.filter((p) => p.toLowerCase().includes(q));
-  }, [playerQuery]);
+    if (!q) return sortedPlayers;
+    return sortedPlayers.filter((p) => p.toLowerCase().includes(q));
+  }, [playerQuery, sortedPlayers]);
+
+  const switchLeague = (next) => {
+    if (next === league) return;
+    setLeague(next);
+    setPlayer("");
+    setPlayerQuery("");
+    setPlayerOpen(false);
+    setPlayerHighlight(0);
+    setResult(null);
+    setError(null);
+  };
 
   const selectPlayer = (name) => {
     setPlayer(name);
@@ -99,7 +119,7 @@ export default function App() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ player, propType, line }),
+        body: JSON.stringify({ player, propType, line, league }),
       });
 
       const data = await response.json();
@@ -113,7 +133,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [player, propType, line]);
+  }, [player, propType, line, league]);
 
   const tierCfg = result ? TIER_CONFIG[result.tier] || TIER_CONFIG.SKIP : null;
   const verdictCfg = result ? VERDICT_CONFIG[result.verdict] || VERDICT_CONFIG.SKIP : null;
@@ -140,15 +160,48 @@ export default function App() {
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 32, borderBottom: "1px solid #1e3040", paddingBottom: 16 }}>
-          <div style={{ fontSize: 11, letterSpacing: 4, color: "#4488aa", marginBottom: 4 }}>
-            NBA PRIZEPICKS
-          </div>
-          <div style={{ fontSize: 22, fontWeight: "bold", color: "#ffffff", letterSpacing: 1 }}>
-            MODEL v3.4
-          </div>
-          <div style={{ fontSize: 11, color: "#446688", marginTop: 4 }}>
-            PLAYOFF CALIBRATED · LIVE DATA · ALL RULES APPLIED
+        <div style={{ marginBottom: 24, borderBottom: "1px solid #1e3040", paddingBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: 4, color: "#4488aa", marginBottom: 4 }}>
+                {league.toUpperCase()} PRIZEPICKS
+              </div>
+              <div style={{ fontSize: 22, fontWeight: "bold", color: "#ffffff", letterSpacing: 1 }}>
+                MODEL v3.4
+              </div>
+              <div style={{ fontSize: 11, color: "#446688", marginTop: 4 }}>
+                {league === "wnba"
+                  ? "WNBA MODE · 40-MIN SCALE · LIVE DATA · ALL RULES APPLIED"
+                  : "PLAYOFF CALIBRATED · LIVE DATA · ALL RULES APPLIED"}
+              </div>
+            </div>
+            <div role="tablist" aria-label="League" style={{ display: "flex", gap: 4 }}>
+              {LEAGUES.map((l) => {
+                const active = l.id === league;
+                return (
+                  <button
+                    key={l.id}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => switchLeague(l.id)}
+                    style={{
+                      background: active ? "#0066cc" : "#0a1420",
+                      color: active ? "#ffffff" : "#7799bb",
+                      border: "1px solid " + (active ? "#0088ff" : "#1e3040"),
+                      padding: "6px 14px",
+                      fontFamily: "'Courier New', monospace",
+                      fontSize: 11,
+                      fontWeight: "bold",
+                      letterSpacing: 2,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {l.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
