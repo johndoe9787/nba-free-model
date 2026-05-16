@@ -163,8 +163,13 @@ export function opponentFor(game, abbr, { league = "nba" } = {}) {
   return null;
 }
 
+// ESPN's predictor exposes the projected win percentage under different stat
+// names per league — "gameProjection" on NBA, "teamPredWinpct" on WNBA. Both
+// carry the same 0–100 semantics so we accept either.
+const PREDICTOR_WIN_PCT_NAMES = new Set(["gameProjection", "teamPredWinpct"]);
+
 function pickGameProjection(side) {
-  const stat = side?.statistics?.find((s) => s.name === "gameProjection");
+  const stat = side?.statistics?.find((s) => PREDICTOR_WIN_PCT_NAMES.has(s.name));
   if (!stat || stat.value == null) return null;
   return stat.value > 1 ? stat.value / 100 : stat.value; // ESPN reports 0–100; normalise to 0–1
 }
