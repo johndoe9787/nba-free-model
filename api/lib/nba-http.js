@@ -56,24 +56,44 @@ function headersFor(params) {
 // and short enough to not dominate orchestrator latency.
 export const NBA_FETCH_TIMEOUT_MS = 6000;
 
+// stats.wnba.com (and to a lesser degree stats.nba.com) intermittently
+// returns 503 or times out, especially when several requests fire in
+// parallel. A single 350ms-backoff retry on 5xx/timeout converts most
+// transient blips into successful responses without meaningfully
+// inflating orchestrator latency. 4xx is treated as terminal — those
+// are typically auth/parameter problems and retrying won't help.
+async function fetchOnce(url, headers) {
+  return fetch(url, {
+    headers,
+    signal: AbortSignal.timeout(NBA_FETCH_TIMEOUT_MS),
+  });
+}
+
 export async function nbaFetch(endpoint, params) {
   const qs = new URLSearchParams(params).toString();
   const base = hostFor(params);
+  const headers = headersFor(params);
   const url = `${base}/${endpoint}?${qs}`;
-  try {
-    const res = await fetch(url, {
-      headers: headersFor(params),
-      signal: AbortSignal.timeout(NBA_FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      console.error(`${logPrefix()}${base} ${endpoint} ${res.status}`);
-      return null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchOnce(url, headers);
+      if (res.ok) return await res.json();
+      if (res.status < 500 || attempt === 1) {
+        console.error(`${logPrefix()}${base} ${endpoint} ${res.status}`);
+        return null;
+      }
+      console.warn(`${logPrefix()}${base} ${endpoint} ${res.status} (retrying)`);
+    } catch (err) {
+      if (attempt === 1) {
+        console.error(`${logPrefix()}${base} ${endpoint} threw:`, err.message);
+        return null;
+      }
+      console.warn(`${logPrefix()}${base} ${endpoint} threw: ${err.message} (retrying)`);
     }
-    return await res.json();
-  } catch (err) {
-    console.error(`${logPrefix()}${base} ${endpoint} threw:`, err.message);
-    return null;
+    await new Promise((r) => setTimeout(r, 350));
   }
+  return null;
 }
 
 export function rowToObj(headers, row) {

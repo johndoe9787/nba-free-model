@@ -54,7 +54,12 @@ export async function gatherGroundTruth({ player, propType, line, league = "nba"
   if (!info) {
     const bdlPlayer = await bdl.findPlayer(player, { league });
     if (!bdlPlayer || !bdlPlayer.team_abbr) {
-      return { skipReason: "player_lookup_failed", message: `Could not resolve ${player} via stats.nba.com${league === "nba" ? " or balldontlie" : ""}` };
+      const host = league === "wnba" ? "stats.wnba.com" : "stats.nba.com";
+      const fallback = league === "nba" ? " or balldontlie" : "";
+      return {
+        skipReason: "player_lookup_failed",
+        message: `Could not resolve ${player} via ${host}${fallback} — likely a transient upstream failure, try again.`,
+      };
     }
     info = {
       player_id: playerId,
