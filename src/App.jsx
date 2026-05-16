@@ -2,12 +2,17 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import nbaPlayersData from "../data/players.json";
 import wnbaPlayersData from "../data/players-wnba.json";
 
-// Pick log shape (v1) — kept stable so a future server-side migration is straightforward:
+// Pick log shape (v1) — additive only; legacy entries may lack 1.5 fields:
 //   { ts: ISO8601, league, player, prop_type, line, direction: "OVER"|"UNDER"|"SKIP",
 //     tier, verdict, confidence, flags_summary: string,
 //     season_avg, l5_avg, win_prob, opponent,
 //     tentative_p, multiplier, tentative_ev,
-//     outcome: null | "W" | "L" | "Push" | "Void" }
+//     outcome: null | "W" | "L" | "Push" | "Void",
+//     // Phase 1.5 raw features — required for Phase 2 β-coefficient fits.
+//     // is_back_to_back is null until the previous-game lookup ships server-side.
+//     is_road, is_back_to_back, is_post_injury, def_rank, position,
+//     home_split_ppg, road_split_ppg,
+//     weighted_l5_avg, outlier_present, variance_ppg_stddev, series_game_number }
 const PICK_LOG_KEY = "pickLog.v1";
 const DEFAULT_MULTIPLIER = 3.0; // 2-leg Power Play default
 // Tier → midpoint probability. These are decision-category proxies, NOT
@@ -187,6 +192,7 @@ export default function App() {
   useEffect(() => {
     if (!result || !result.tier) return;
     const ts = new Date().toISOString();
+    const gt = result.ground_truth ?? {};
     const entry = {
       ts,
       league,
@@ -206,6 +212,18 @@ export default function App() {
       multiplier,
       tentative_ev: tentativeEv(tierImpliedP(result.tier), multiplier),
       outcome: null,
+      // Phase 1.5 raw features captured from groundTruth for Phase 2 fits.
+      is_road: gt.home_away === "away",
+      is_back_to_back: null, // TODO: needs previous-game lookup in api/lib data layer
+      is_post_injury: gt.player_recent?.is_listed_injured ?? null,
+      def_rank: gt.opponent_defense?.def_rank ?? null,
+      position: gt.derived?.player_position ?? null,
+      home_split_ppg: gt.splits?.home?.ppg ?? null,
+      road_split_ppg: gt.splits?.road?.ppg ?? null,
+      weighted_l5_avg: gt.l5?.weighted?.averages?.ppg ?? null,
+      outlier_present: gt.l5?.weighted?.outlier_present ?? null,
+      variance_ppg_stddev: gt.variance?.ppg_stddev ?? null,
+      series_game_number: gt.series?.next_game_number ?? null,
     };
     const key = `${player}|${propType}|${line}|${result.tier}|${result.verdict}|${result.confidence}`;
     if (lastLoggedKey.current === key) return;
