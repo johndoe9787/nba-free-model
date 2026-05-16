@@ -1,0 +1,56 @@
+name: Refresh data snapshots
+
+# stats.nba.com 403s Vercel egress IPs, so the JSON snapshots in data/ are the
+# fallback path. This workflow runs the same refresh scripts the user runs
+# locally — GitHub Actions runners are on Azure ranges and reach the source
+# fine. The commit back to main triggers Vercel's auto-deploy, propagating
+# fresh data to production and to every preview build that follows.
+
+on:
+  schedule:
+    # Mondays and Thursdays at 11:00 UTC.
+    - cron: '0 11 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Refresh NBA team defense
+        run: npm run refresh-team-defense
+        continue-on-error: true
+
+      - name: Refresh WNBA team defense
+        run: npm run refresh-wnba-team-defense
+        continue-on-error: true
+
+      - name: Refresh NBA playoff players
+        run: npm run refresh-players
+        continue-on-error: true
+
+      - name: Refresh WNBA players
+        run: npm run refresh-wnba-players
+        continue-on-error: true
+
+      - name: Commit and push if snapshots changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet data/; then
+            echo "No changes in data/ — nothing to commit."
+          else
+            git add data/
+            git commit -m "Refresh data snapshots ($(date -u +%Y-%m-%d))"
+            git push
+          fi
