@@ -2,7 +2,7 @@
 
 NBA PrizePicks verdict engine. A React + Vite UI calls a single Vercel
 Function (`api/analyze.js`) that gathers ground-truth stats, hands them to
-Gemini under the v3.3 framework, and returns a tiered verdict.
+Gemini under the v3.5 framework, and returns a tiered verdict.
 https://nba-free-model.vercel.app/
 
 ## Setup
