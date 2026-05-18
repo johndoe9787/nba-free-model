@@ -6,7 +6,7 @@
 // Endpoint: site.web.api.espn.com/.../athletes/{id}/gamelog?season={endYear}
 // where season is the END year of the season label, e.g. 2026 for "2025-26".
 
-import { logPrefix } from "./request-context.js";
+import { log } from "./logger.js";
 import { getLeagueConfig } from "./league-config.js";
 
 function gamelogBase(league) {
@@ -118,12 +118,12 @@ async function fetchGamelog(athleteId, endYear, league = "nba") {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
-      console.error(`${logPrefix()}espn gamelog ${athleteId} ${res.status}`);
+      log.error("espn.gamelog_http_error", { athleteId, status: res.status });
       return null;
     }
     return await res.json();
   } catch (err) {
-    console.error(`${logPrefix()}espn gamelog ${athleteId} threw:`, err.message);
+    log.error("espn.gamelog_threw", { athleteId, error: err.message });
     return null;
   }
 }
@@ -172,12 +172,12 @@ function bucketLayoutOk(bucket, league = "nba") {
   const labels = findLabels(bucket);
   if (!labels) return true; // absent — happy path, IDX assumed
   if (labels.length < expected.length) {
-    console.error(`${logPrefix()}espn ${league} gamelog layout diverged: expected >=${expected.length} cols, got ${labels.length}`);
+    log.error("espn.gamelog_layout_count", { league, expected: expected.length, got: labels.length });
     return false;
   }
   for (let i = 0; i < expected.length; i++) {
     if (String(labels[i]).toUpperCase() !== expected[i]) {
-      console.error(`${logPrefix()}espn ${league} gamelog layout diverged at col ${i}: expected "${expected[i]}", got "${labels[i]}"`);
+      log.error("espn.gamelog_layout_col", { league, col: i, expected: expected[i], got: labels[i] });
       return false;
     }
   }

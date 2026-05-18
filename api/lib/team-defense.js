@@ -9,7 +9,7 @@
 import * as cache from "./cache.js";
 import { getLeagueTeamDefense, currentSeasonForLeague } from "./nba-stats.js";
 import { toNbaAbbr } from "./espn.js";
-import { logPrefix } from "./request-context.js";
+import { log } from "./logger.js";
 import { getLeagueConfig } from "./league-config.js";
 import nbaSnapshot from "../../data/team-defense.json" with { type: "json" };
 import wnbaSnapshot from "../../data/team-defense-wnba.json" with { type: "json" };
@@ -73,6 +73,6 @@ export async function getOpponentDefense(opponentEspnAbbr, {
     };
   }
 
-  console.warn(`${logPrefix()}team-defense miss for ${nbaAbbr} (espn=${opponentEspnAbbr}, league=${league}); live and snapshot both empty`);
+  log.warn("team_defense.miss", { nbaAbbr, espnAbbr: opponentEspnAbbr, league });
   return null;
 }

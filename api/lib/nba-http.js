@@ -5,7 +5,7 @@
 // across them; this file is the single place to fix when stats.nba.com
 // tightens its bot detection or rotates header expectations.
 
-import { logPrefix } from "./request-context.js";
+import { log } from "./logger.js";
 
 export const NBA_BASE = "https://stats.nba.com/stats";
 export const WNBA_BASE = "https://stats.wnba.com/stats";
@@ -80,16 +80,16 @@ export async function nbaFetch(endpoint, params) {
       const res = await fetchOnce(url, headers);
       if (res.ok) return await res.json();
       if (res.status < 500 || attempt === 1) {
-        console.error(`${logPrefix()}${base} ${endpoint} ${res.status}`);
+        log.error("nba_stats.http_error", { base, endpoint, status: res.status });
         return null;
       }
-      console.warn(`${logPrefix()}${base} ${endpoint} ${res.status} (retrying)`);
+      log.warn("nba_stats.http_retry", { base, endpoint, status: res.status });
     } catch (err) {
       if (attempt === 1) {
-        console.error(`${logPrefix()}${base} ${endpoint} threw:`, err.message);
+        log.error("nba_stats.threw", { base, endpoint, error: err.message });
         return null;
       }
-      console.warn(`${logPrefix()}${base} ${endpoint} threw: ${err.message} (retrying)`);
+      log.warn("nba_stats.threw_retry", { base, endpoint, error: err.message });
     }
     await new Promise((r) => setTimeout(r, 350));
   }

@@ -24,6 +24,7 @@ import { buildFramework } from "./lib/framework.js";
 import { getLeagueConfig, isValidLeague } from "./lib/league-config.js";
 import { rateLimit } from "./lib/rate-limit.js";
 import { runWithRequestContext } from "./lib/request-context.js";
+import { log } from "./lib/logger.js";
 import { randomUUID } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -237,7 +238,12 @@ async function handlePost(req) {
 
     return Response.json({ ...llm.json, ground_truth: groundTruth });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    log.error("analyze.unhandled", { error: error.message, stack: error.stack });
+    const isProd = process.env.NODE_ENV === "production";
+    return Response.json(
+      { error: isProd ? "Internal server error" : error.message },
+      { status: 500 }
+    );
   }
 }
 

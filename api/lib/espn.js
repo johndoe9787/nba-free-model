@@ -6,7 +6,7 @@
 // cache keys are scoped per league so NBA and WNBA traffic don't collide.
 
 import * as cache from "./cache.js";
-import { logPrefix } from "./request-context.js";
+import { log } from "./logger.js";
 import { getLeagueConfig } from "./league-config.js";
 
 const TTL_SCOREBOARD_MS = 60_000;
@@ -31,12 +31,12 @@ async function jsonFetch(url) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
-      console.error(`${logPrefix()}espn ${url} ${res.status}`);
+      log.error("espn.http_error", { url, status: res.status });
       return null;
     }
     return await res.json();
   } catch (err) {
-    console.error(`${logPrefix()}espn ${url} threw:`, err.message);
+    log.error("espn.threw", { url, error: err.message });
     return null;
   }
 }

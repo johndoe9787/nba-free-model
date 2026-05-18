@@ -4,7 +4,7 @@
 // Auth: header `Authorization: <key>` (no "Bearer" prefix).
 // Season convention: balldontlie uses the START year. 2025-26 → season=2025.
 
-import { logPrefix } from "./request-context.js";
+import { log } from "./logger.js";
 
 const BASE = "https://api.balldontlie.io/v1";
 
@@ -19,7 +19,7 @@ function authHeader() {
 async function bdlFetch(path, params = {}) {
   const auth = authHeader();
   if (!auth) {
-    console.error(`${logPrefix()}BALLDONTLIE_API_KEY not set`);
+    log.error("balldontlie.missing_key");
     return null;
   }
   const qs = new URLSearchParams();
@@ -31,12 +31,12 @@ async function bdlFetch(path, params = {}) {
   try {
     const res = await fetch(url, { headers: auth, signal: AbortSignal.timeout(8000) });
     if (!res.ok) {
-      console.error(`${logPrefix()}balldontlie ${path} ${res.status}`);
+      log.error("balldontlie.http_error", { path, status: res.status });
       return null;
     }
     return await res.json();
   } catch (err) {
-    console.error(`${logPrefix()}balldontlie ${path} threw:`, err.message);
+    log.error("balldontlie.threw", { path, error: err.message });
     return null;
   }
 }
@@ -116,7 +116,7 @@ export async function findPlayer(name, { league = "nba" } = {}) {
   const match = exactWithSuffix ?? exactFull ?? firstInitialMatch;
   if (!match) return null;
   if (!exactWithSuffix && !exactFull && firstInitialMatch) {
-    console.warn(`${logPrefix()}balldontlie fuzzy match for "${name}" → "${firstInitialMatch.first_name} ${firstInitialMatch.last_name}"`);
+    log.warn("balldontlie.fuzzy_match", { name, matched: `${firstInitialMatch.first_name} ${firstInitialMatch.last_name}` });
   }
   const result = {
     id: match.id,
