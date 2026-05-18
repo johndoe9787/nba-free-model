@@ -54,7 +54,7 @@ confirmation required, else A-tier max.
 
 ## Hard gates (cannot be bypassed)
 - Post-injury return: first 5 games back = A-tier max (Section 6)
-- Assist win-probability gate: team win prob 40–75% (Rule 5c)
+- Assist win-probability gate: team win prob 35–80% (Rule 5c)
 - Multi-star compression: 3rd/4th scorer w/ 3+ teammates ≥15 PPG, favored ≥10 = A-tier max (Rule 4k)
 - UNDER mechanism gate: no named mechanism → no UNDER, regardless of suppressor activity (5g)
 

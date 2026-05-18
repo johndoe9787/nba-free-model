@@ -43,7 +43,7 @@ PLAYOFF MODE RULES (active when ${f.league_name} postseason is ongoing):
 
 HARD GATES (cannot be bypassed):
 - Post-injury return gate: first 5 games back = A-tier max
-- Assist win probability gate: team win prob must be 40-75%
+- Assist win probability gate: team win prob must be 35-80%
 - Multi-star compression (Rule 4c): 3rd/4th scorer on team with 3+ players at 15+ PPG, favored 10+ = A-tier max; compounds with 5f → B-tier max with SKIP advisory
 - UNDER mechanism gate: no named mechanism = SKIP, not UNDER
 - Rule 4b active (sole alpha boost): UNDER invalid on that player
