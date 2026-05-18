@@ -1,16 +1,26 @@
-// Structured JSON logger. Emits one line of JSON per event to stdout, which
-// Vercel captures and makes searchable in the function logs UI.
+// Structured JSON logger with optional Sentry forwarding.
 //
-// Reuses the per-request AsyncLocalStorage context so log lines from a single
-// request can be correlated via reqId without threading the id through every
-// call site.
+// Emits one line of JSON per event to stdout (Vercel captures it in the
+// function logs UI). When SENTRY_DSN is set, log.error() also forwards to
+// Sentry.captureMessage so errors surface in the Sentry dashboard.
+//
+// Reuses the per-request AsyncLocalStorage reqId so log lines from a single
+// request can be correlated without threading the id through every call site.
 //
 // Code naming: <source>.<event_type>, snake_case — e.g. "balldontlie.http_error".
-//
-// Sentry hook: when SENTRY_DSN is wired (see SENTRY_SETUP.md), forward
-// log.error() calls to Sentry.captureException() inside emit().
 
+import * as Sentry from "@sentry/node";
 import { getReqId } from "./request-context.js";
+
+const sentryDsn = process.env.SENTRY_DSN;
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: process.env.VERCEL_ENV || process.env.NODE_ENV,
+    release: process.env.VERCEL_GIT_COMMIT_SHA,
+    tracesSampleRate: 0,
+  });
+}
 
 function emit(level, code, fields = {}) {
   const reqId = getReqId();
@@ -21,6 +31,13 @@ function emit(level, code, fields = {}) {
     ...(reqId ? { reqId } : {}),
     ...fields,
   }));
+
+  if (level === "error" && sentryDsn) {
+    Sentry.captureMessage(code, {
+      level: "error",
+      extra: { ...fields, ...(reqId ? { reqId } : {}) },
+    });
+  }
 }
 
 export const log = {

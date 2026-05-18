@@ -1,45 +1,34 @@
 # Sentry setup
 
-Structured logging is wired (see `api/lib/logger.js`). Sentry forwarding is
-deferred until you have a DSN. Steps to enable:
+The `@sentry/node` SDK is installed and wired in `api/lib/logger.js`. When
+`SENTRY_DSN` is present, `log.error()` calls forward to Sentry automatically.
+When absent, the SDK is not initialized and logger calls are pure stdout
+emissions. Three steps remain (all configuration, no code).
 
 ## 1. Create a Sentry project
-- Go to https://sentry.io → New Project → platform **Node.js**.
-- Copy the DSN (looks like `https://abc123@oNNNNN.ingest.us.sentry.io/PPPPP`).
+- https://sentry.io → New Project → platform **Node.js**.
+- Copy the DSN — looks like `https://abc123@oNNNNN.ingest.us.sentry.io/PPPPP`.
 
-## 2. Add the DSN to Vercel env vars
-- Vercel dashboard → Project → Settings → Environment Variables.
-- Add `SENTRY_DSN` for Production (and Preview if you want preview deploys to report).
-- Server-side only — do NOT prefix with `VITE_`.
+## 2. Add `SENTRY_DSN` to Vercel
+- Vercel dashboard → this project → Settings → Environment Variables.
+- Add `SENTRY_DSN=<your-dsn>` for **Production** (and **Preview** if you want
+  preview deploys to report too).
+- Server-side only — do **not** prefix with `VITE_`.
 
 ## 3. Mirror to `.env.local` for local dev
-- Append `SENTRY_DSN=...` to `.env.local` so smoke scripts / `vercel dev` capture too.
-- Also add `SENTRY_DSN=` to `.env.example` as an optional key.
+- Append `SENTRY_DSN=<your-dsn>` to `.env.local` so `vercel dev` and smoke
+  scripts also report. `.env.example` already lists the key as optional.
 
-## 4. Wire `@sentry/node` in `api/lib/logger.js`
-Once the DSN exists, the wiring is small:
+## 4. Verify
+- Trigger a known error path (e.g. malformed `/api/analyze` request, or unset
+  `BALLDONTLIE_API_KEY` to force the `balldontlie.missing_key` log).
+- Event should appear in Sentry within ~1 minute, tagged with `environment`
+  (production / preview / development) and `release` (the deploy's commit SHA).
 
-```js
-// at top of api/lib/logger.js
-import * as Sentry from "@sentry/node";
-
-const dsn = process.env.SENTRY_DSN;
-if (dsn) {
-  Sentry.init({ dsn, tracesSampleRate: 0 });
-}
-
-// inside emit(), after the console.log:
-if (level === "error" && dsn) {
-  Sentry.captureMessage(code, {
-    level: "error",
-    extra: { ...fields, reqId },
-  });
-}
-```
-
-Then: `npm install @sentry/node` (single runtime dep, ~700KB).
-
-## 5. Verify
-- Trigger a known error path (e.g. malformed `/api/analyze` request, or pull
-  the `BALLDONTLIE_API_KEY` to force the `balldontlie.missing_key` log).
-- Confirm the event appears in Sentry within ~1 minute.
+## What gets captured
+- Every `log.error(code, fields)` call → Sentry event with `code` as the
+  message, `level: error`, and `fields + reqId` as extras.
+- `log.info` and `log.warn` go to stdout only — Sentry is reserved for errors
+  to keep quota under control.
+- `tracesSampleRate: 0` — no performance tracing. Enable later in `logger.js`
+  if you want it.
