@@ -345,20 +345,42 @@ OUTPUT (single JSON object):
 async function callGemini(apiKey, prompt) {
   // Try primary model up to 3 times (1 initial + 2 retries) on transient
   // overload, then fall back to flash-lite once before surfacing the error.
+  // 8s total budget across all attempts + delays — past that the user
+  // would rather see a timeout than keep waiting for a hung Gemini call.
   const PRIMARY = "gemini-2.5-flash";
   const FALLBACK = "gemini-2.5-flash-lite";
   const primaryDelays = [0, 500, 1500];
+  const TOTAL_BUDGET_MS = 8000;
 
-  let last;
-  for (const delay of primaryDelays) {
-    if (delay) await sleep(delay);
-    last = await geminiAttempt(apiKey, prompt, PRIMARY);
-    if (!last.error || !last.retryable) return stripRetryable(last);
+  const controller = new AbortController();
+  const budgetTimer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
+
+  try {
+    let last;
+    for (const delay of primaryDelays) {
+      if (delay) await sleep(delay);
+      if (controller.signal.aborted) {
+        log.warn("gemini.budget_exceeded", { stage: "primary", budgetMs: TOTAL_BUDGET_MS });
+        return stripRetryable(last ?? { error: "Gemini request timed out" });
+      }
+      last = await geminiAttempt(apiKey, prompt, PRIMARY, controller.signal);
+      if (!last.error || !last.retryable) return stripRetryable(last);
+    }
+
+    if (controller.signal.aborted) {
+      log.warn("gemini.budget_exceeded", { stage: "before_fallback", budgetMs: TOTAL_BUDGET_MS });
+      return stripRetryable(last);
+    }
+    await sleep(500);
+    if (controller.signal.aborted) {
+      log.warn("gemini.budget_exceeded", { stage: "before_fallback", budgetMs: TOTAL_BUDGET_MS });
+      return stripRetryable(last);
+    }
+    last = await geminiAttempt(apiKey, prompt, FALLBACK, controller.signal);
+    return stripRetryable(last);
+  } finally {
+    clearTimeout(budgetTimer);
   }
-
-  await sleep(500);
-  last = await geminiAttempt(apiKey, prompt, FALLBACK);
-  return stripRetryable(last);
 }
 
 function sleep(ms) {
@@ -369,10 +391,10 @@ function stripRetryable({ retryable: _r, ...rest }) {
   return rest;
 }
 
-async function geminiAttempt(apiKey, prompt, model) {
-  let res;
+async function geminiAttempt(apiKey, prompt, model, signal) {
+  let data;
   try {
-    res = await fetch(
+    const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: "POST",
@@ -385,13 +407,17 @@ async function geminiAttempt(apiKey, prompt, model) {
             responseMimeType: "application/json",
           },
         }),
+        signal,
       }
     );
+    data = await res.json();
   } catch (err) {
+    if (err.name === "AbortError") {
+      return { error: "Gemini request timed out", retryable: false };
+    }
     return { error: `Gemini fetch failed: ${err.message}`, retryable: true };
   }
 
-  const data = await res.json();
   if (data.error) {
     const status = data.error.status;
     const code = data.error.code;
