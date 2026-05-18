@@ -178,8 +178,14 @@ async function handlePost(req) {
     const { player, propType, line } = body;
     const league = (body.league ?? "nba").toLowerCase();
 
-    if (!player || !propType || !line) {
-      return Response.json({ error: "Missing required fields" }, { status: 400 });
+    if (typeof player !== "string" || !player.trim() || player.length > 100) {
+      return Response.json({ error: "Invalid player: must be a non-empty string up to 100 characters" }, { status: 400 });
+    }
+    if (typeof propType !== "string" || !propType.trim() || propType.length > 50) {
+      return Response.json({ error: "Invalid propType: must be a non-empty string up to 50 characters" }, { status: 400 });
+    }
+    if (typeof line !== "number" || !Number.isFinite(line) || line <= 0 || line > 500) {
+      return Response.json({ error: "Invalid line: must be a positive finite number" }, { status: 400 });
     }
 
     if (!isValidLeague(league)) {
