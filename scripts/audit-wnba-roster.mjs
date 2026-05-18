@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
+import { normName } from "./lib/common.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SEED_PATH = path.join(ROOT, "data/players-wnba.json");
@@ -19,19 +20,6 @@ const TEAMS_URL =
   "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams?limit=50";
 const rosterUrl = (teamId) =>
   `https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/${teamId}/roster`;
-
-// Match refresh-wnba-players.mjs and api/lib/* — strip accents, case,
-// punctuation; collapse whitespace. Two names normalize equal iff they refer
-// to the same player.
-function normName(s) {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[.'’\-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 async function jget(url) {
   const r = await fetch(url, { signal: AbortSignal.timeout(10000) });

@@ -16,6 +16,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { PLAYER_INFO } from "../api/lib/player-ids.js";
+import { NBA_HEADERS } from "../api/lib/nba-http.js";
+import { normName, jsonFetch, sleep } from "./lib/common.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLAYERS_JSON_PATH = path.join(ROOT, "data/players.json");
@@ -30,48 +32,11 @@ const PLAYOFF_ABBRS = new Set(["RD16", "RD8", "RD4", "RD2"]);
 const MIN_MINUTES = 10;
 const LOOKBACK_DAYS = 14;
 
-const NBA_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-  Referer: "https://www.nba.com/",
-  Origin: "https://www.nba.com",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "x-nba-stats-origin": "stats",
-  "x-nba-stats-token": "true",
-};
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 function fmtYYYYMMDD(d) {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(d.getUTCDate()).padStart(2, "0");
   return `${y}${m}${dd}`;
-}
-
-function normName(s) {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[.'’\-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function jsonFetch(url, opts = {}) {
-  try {
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-      console.error(`  HTTP ${res.status} ${url.slice(0, 90)}`);
-      return null;
-    }
-    return await res.json();
-  } catch (err) {
-    console.error(`  fetch threw on ${url.slice(0, 80)}: ${err.message}`);
-    return null;
-  }
 }
 
 function parseMinutes(min) {

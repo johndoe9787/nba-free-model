@@ -14,6 +14,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { PLAYER_INFO_WNBA } from "../api/lib/player-ids.js";
+import { WNBA_HEADERS } from "../api/lib/nba-http.js";
+import { normName, jsonFetch, sleep } from "./lib/common.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_PATH = path.join(ROOT, "data/players-wnba.json");
@@ -32,45 +34,6 @@ function playerIndexUrl(season) {
   return `https://stats.wnba.com/stats/playerindex?LeagueID=10&Season=${season}&Active=&AllStar=&College=&Country=&DraftPick=&DraftRound=&DraftYear=&Height=&Historical=1&TeamID=0&Weight=`;
 }
 
-// stats.wnba.com's CDN blocks the Chrome-on-Windows UA stats.nba.com accepts.
-// Chrome-on-Mac is allowed. Keep these two scripts in sync with WNBA_HEADERS
-// in api/lib/nba-http.js if you have to rotate the UA.
-const NBA_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-  Referer: "https://www.wnba.com/",
-  Origin: "https://www.wnba.com",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "x-nba-stats-origin": "stats",
-  "x-nba-stats-token": "true",
-};
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function normName(s) {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[.'’\-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function jsonFetch(url, opts = {}) {
-  try {
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-      console.error(`  HTTP ${res.status} ${url.slice(0, 90)}`);
-      return null;
-    }
-    return await res.json();
-  } catch (err) {
-    console.error(`  fetch threw on ${url.slice(0, 80)}: ${err.message}`);
-    return null;
-  }
-}
 
 async function fetchWnbaPlayerIndex() {
   // Early in a new WNBA season (e.g., May before games are played) the
@@ -80,7 +43,7 @@ async function fetchWnbaPlayerIndex() {
   const thisYear = Number(currentWnbaSeason());
   const tryYears = [thisYear, thisYear - 1];
   for (const season of tryYears) {
-    const data = await jsonFetch(playerIndexUrl(String(season)), { headers: NBA_HEADERS });
+    const data = await jsonFetch(playerIndexUrl(String(season)), { headers: WNBA_HEADERS });
     const rs = data?.resultSets?.[0];
     if (!rs?.rowSet?.length) {
       console.warn(`  playerindex Season=${season} empty — trying previous season`);

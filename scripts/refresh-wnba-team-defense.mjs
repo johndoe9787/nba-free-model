@@ -8,23 +8,10 @@ import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WNBA_TEAM_ID_TO_ABBR } from "../api/lib/league-config.js";
+import { WNBA_HEADERS } from "../api/lib/nba-http.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_PATH = path.join(ROOT, "data/team-defense-wnba.json");
-
-// stats.wnba.com's CDN blocks the Chrome-on-Windows UA stats.nba.com accepts.
-// Chrome-on-Mac is allowed. Keep in sync with WNBA_HEADERS in nba-http.js.
-const NBA_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  Origin: "https://www.wnba.com",
-  Referer: "https://www.wnba.com/",
-  "x-nba-stats-origin": "stats",
-  "x-nba-stats-token": "true",
-};
 
 function currentWnbaSeason(date = new Date()) {
   return String(date.getUTCFullYear());
@@ -67,7 +54,7 @@ async function fetchLeagueAdvanced(season, seasonType) {
   }).toString();
   const url = `https://stats.wnba.com/stats/leaguedashteamstats?${params}`;
   const res = await fetch(url, {
-    headers: NBA_HEADERS,
+    headers: WNBA_HEADERS,
     signal: AbortSignal.timeout(20000),
   });
   if (!res.ok) throw new Error(`stats.nba.com HTTP ${res.status} for WNBA ${seasonType}`);
