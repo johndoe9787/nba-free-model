@@ -345,12 +345,17 @@ OUTPUT (single JSON object):
 async function callGemini(apiKey, prompt) {
   // Try primary model up to 3 times (1 initial + 2 retries) on transient
   // overload, then fall back to flash-lite once before surfacing the error.
-  // 8s total budget across all attempts + delays — past that the user
+  // 30s total budget across all attempts + delays — past that the user
   // would rather see a timeout than keep waiting for a hung Gemini call.
+  // Earlier 8s and 15s caps proved too tight in practice; local-dev
+  // paths to googleapis.com have higher latency than Vercel's edge, and
+  // long-justification responses regularly take 12-15s on the primary
+  // attempt alone. Vercel functions cap at 300s by default, so the
+  // budget is purely a UX bound, not a platform constraint.
   const PRIMARY = "gemini-2.5-flash";
   const FALLBACK = "gemini-2.5-flash-lite";
   const primaryDelays = [0, 500, 1500];
-  const TOTAL_BUDGET_MS = 8000;
+  const TOTAL_BUDGET_MS = 30000;
 
   const controller = new AbortController();
   const budgetTimer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
