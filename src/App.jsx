@@ -1,48 +1,8 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import nbaPlayersData from "../data/players.json";
 import wnbaPlayersData from "../data/players-wnba.json";
-
-// Pick log shape (v1) — additive only; legacy entries may lack 1.5 fields:
-//   { ts: ISO8601, league, player, prop_type, line, direction: "OVER"|"UNDER"|"SKIP",
-//     tier, verdict, confidence, flags_summary: string,
-//     season_avg, l5_avg, win_prob, opponent,
-//     tentative_p, multiplier, tentative_ev,
-//     outcome: null | "W" | "L" | "Push" | "Void",
-//     // Phase 1.5 raw features — required for Phase 2 β-coefficient fits.
-//     // is_back_to_back is null until the previous-game lookup ships server-side.
-//     is_road, is_back_to_back, is_post_injury, def_rank, position,
-//     home_split_ppg, road_split_ppg,
-//     weighted_l5_avg, outlier_present, variance_ppg_stddev, series_game_number }
-const PICK_LOG_KEY = "pickLog.v1";
-const DEFAULT_MULTIPLIER = 3.0; // 2-leg Power Play default
-// Tier → midpoint probability. These are decision-category proxies, NOT
-// calibrated. Surfaces "what would EV be IF the tier label matches reality" —
-// until enough outcomes accumulate to fit calibration in Phase 2.
-const TIER_MIDPOINT = { S: 0.86, A: 0.75, B: 0.65, SKIP: 0.50 };
-
-function tierImpliedP(tier) {
-  return TIER_MIDPOINT[tier] ?? null;
-}
-function tentativeEv(p, multiplier) {
-  if (p == null || !Number.isFinite(multiplier) || multiplier <= 0) return null;
-  return p * multiplier - 1;
-}
-function loadPickLog() {
-  try {
-    const raw = localStorage.getItem(PICK_LOG_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-function savePickLog(entries) {
-  localStorage.setItem(PICK_LOG_KEY, JSON.stringify(entries));
-}
-function dedupeKey(entry) {
-  return `${entry.ts}|${entry.player}|${entry.prop_type}|${entry.line}`;
-}
+import { tierImpliedP, tentativeEv, DEFAULT_MULTIPLIER } from "./lib/picklog-stats.js";
+import { usePickLog } from "./hooks/usePickLog.js";
 
 const PLAYERS_BY_LEAGUE = {
   nba: Object.keys(nbaPlayersData).sort(),
@@ -103,7 +63,16 @@ export default function App() {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [playerHighlight, setPlayerHighlight] = useState(0);
   const [multiplier, setMultiplier] = useState(DEFAULT_MULTIPLIER);
-  const [pickLog, setPickLog] = useState(() => loadPickLog());
+  const {
+    pickLog,
+    logStats,
+    appendEntry,
+    setOutcome,
+    deleteEntry,
+    clearLog,
+    exportLog,
+    importLog,
+  } = usePickLog();
   const [logOpen, setLogOpen] = useState(false);
   const importInputRef = useRef(null);
   const lastLoggedKey = useRef(null);
@@ -166,7 +135,7 @@ export default function App() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ player, propType, line, league }),
+        body: JSON.stringify({ player, propType, line: Number(line), league }),
       });
 
       const data = await response.json();
@@ -181,11 +150,6 @@ export default function App() {
       setLoading(false);
     }
   }, [player, propType, line, league]);
-
-  // Persist pick log to localStorage whenever it changes.
-  useEffect(() => {
-    savePickLog(pickLog);
-  }, [pickLog]);
 
   // Append the most recent verdict to the pick log exactly once. Re-runs of
   // the same analysis (same player/prop/line) skip; new analyses append.
@@ -228,69 +192,11 @@ export default function App() {
     const key = `${player}|${propType}|${line}|${result.tier}|${result.verdict}|${result.confidence}`;
     if (lastLoggedKey.current === key) return;
     lastLoggedKey.current = key;
-    setPickLog((prev) => [entry, ...prev]);
+    appendEntry(entry);
     // multiplier intentionally excluded: changing it after a verdict should not
     // re-log; the user can edit the multiplier on the entry directly later.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
-
-  const setOutcome = useCallback((ts, outcome) => {
-    setPickLog((prev) => prev.map((p) => (p.ts === ts ? { ...p, outcome } : p)));
-  }, []);
-  const deleteEntry = useCallback((ts) => {
-    setPickLog((prev) => prev.filter((p) => p.ts !== ts));
-  }, []);
-  const clearLog = useCallback(() => {
-    if (confirm(`Delete all ${pickLog.length} pick log entries? This cannot be undone.`)) {
-      setPickLog([]);
-    }
-  }, [pickLog.length]);
-  const exportLog = useCallback(() => {
-    const blob = new Blob([JSON.stringify(pickLog, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pick-log-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [pickLog]);
-  const importLog = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed)) throw new Error("not an array");
-        setPickLog((prev) => {
-          const seen = new Set(prev.map(dedupeKey));
-          const additions = parsed.filter((p) => p && p.ts && !seen.has(dedupeKey(p)));
-          return [...additions, ...prev];
-        });
-      } catch (err) {
-        alert(`Import failed: ${err.message}`);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = ""; // allow re-importing the same file
-  }, []);
-
-  const logStats = useMemo(() => {
-    const decided = pickLog.filter((p) => p.outcome === "W" || p.outcome === "L");
-    const n = decided.length;
-    if (n === 0) return { n: 0, hitRate: null, ci: null, total: pickLog.length };
-    const wins = decided.filter((p) => p.outcome === "W").length;
-    const hitRate = wins / n;
-    // Wilson 95% CI — small-n appropriate (vs. normal approximation which
-    // breaks at the bounds when n is tiny).
-    const z = 1.96;
-    const denom = 1 + (z * z) / n;
-    const centre = hitRate + (z * z) / (2 * n);
-    const margin = z * Math.sqrt((hitRate * (1 - hitRate)) / n + (z * z) / (4 * n * n));
-    const lo = Math.max(0, (centre - margin) / denom);
-    const hi = Math.min(1, (centre + margin) / denom);
-    return { n, hitRate, ci: [lo, hi], total: pickLog.length };
-  }, [pickLog]);
 
   const resultP = result ? tierImpliedP(result.tier) : null;
   const resultEv = tentativeEv(resultP, multiplier);
