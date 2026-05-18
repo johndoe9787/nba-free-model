@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test scripts/*.test.mjs",
     "preview": "vite preview",
     "refresh-players": "node scripts/refresh-playoff-players.mjs",
     "refresh-team-defense": "node scripts/refresh-team-defense.mjs",

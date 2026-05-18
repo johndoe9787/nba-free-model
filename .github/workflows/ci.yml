@@ -1,8 +1,6 @@
 name: CI
 
-# PR validation: build + lint before merge to main.
-# A smoke-orchestrator step will be added once scripts/smoke-orchestrator.mjs
-# is converted to use assertions (see AUDIT.md item #4).
+# PR validation: build + lint + smoke tests before merge to main.
 
 on:
   pull_request:
@@ -28,3 +26,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Smoke tests
+        run: npm test
