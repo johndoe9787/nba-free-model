@@ -11,7 +11,8 @@
     "refresh-players": "node scripts/refresh-playoff-players.mjs",
     "refresh-team-defense": "node scripts/refresh-team-defense.mjs",
     "refresh-wnba-players": "node scripts/refresh-wnba-players.mjs",
-    "refresh-wnba-team-defense": "node scripts/refresh-wnba-team-defense.mjs"
+    "refresh-wnba-team-defense": "node scripts/refresh-wnba-team-defense.mjs",
+    "sync-wnba-roster": "node scripts/audit-wnba-roster.mjs"
   },
   "dependencies": {
     "react": "^19.2.5",
