@@ -93,30 +93,56 @@ export async function findPlayer(name, { league = "nba" } = {}) {
   const stripped = name.replace(SUFFIX_RE, "").trim();
   const hasSuffix = stripped !== name.trim();
   const parts = stripped.split(/\s+/).filter(Boolean);
-  const searchToken = hasSuffix ? parts[0] : parts[parts.length - 1];
-  const data = await bdlFetch("/players", { search: searchToken, per_page: 25 });
-  if (!data?.data?.length) return null;
   const fullLower = normalize(name);
-  // Tier 1: exact match with suffix preserved — disambiguates "Jabari Smith"
-  // (elder, drafted 2000) from "Jabari Smith Jr." (current Rockets).
-  const exactWithSuffix = data.data.find(
-    (p) => normalize(`${p.first_name} ${p.last_name}`) === fullLower
-  );
   const target = normName(name);
   const lastNorm = normName(parts[parts.length - 1]);
-  const exactFull = data.data.find((p) => normName(`${p.first_name} ${p.last_name}`) === target);
-  // Tier 3: fuzzy match on last name + first initial. Prevents wrong-player
-  // hits on common surnames ("Tyrese Smith" → first random "Smith") while
-  // still resolving "Steph Curry" → "Stephen Curry".
-  const firstInitial = normalize(parts[0] ?? "").charAt(0);
-  const firstInitialMatch = firstInitial && data.data.find((p) =>
-    normName(p.last_name) === lastNorm &&
-    normalize(p.first_name).charAt(0) === firstInitial
-  );
-  const match = exactWithSuffix ?? exactFull ?? firstInitialMatch;
+  const firstNorm = normalize(parts[0] ?? "");
+
+  const findExact = (rows) => {
+    // Tier 1: exact match with suffix preserved — disambiguates "Jabari Smith"
+    // (elder, drafted 2000) from "Jabari Smith Jr." (current Rockets).
+    const exactWithSuffix = rows.find(
+      (p) => normalize(`${p.first_name} ${p.last_name}`) === fullLower
+    );
+    if (exactWithSuffix) return exactWithSuffix;
+    return rows.find((p) => normName(`${p.first_name} ${p.last_name}`) === target);
+  };
+
+  // Search by last name first (or first name when a generational suffix makes
+  // it more discriminative). balldontlie caps results at 100, so common
+  // surnames like "Williams" can push current players off the page; if no
+  // exact match is found, retry with the other token before falling back to
+  // fuzzy matching.
+  const primaryToken = hasSuffix ? parts[0] : parts[parts.length - 1];
+  const secondaryToken = hasSuffix ? parts[parts.length - 1] : parts[0];
+  const primary = await bdlFetch("/players", { search: primaryToken, per_page: 100 });
+  if (!primary?.data?.length) return null;
+  let pool = primary.data;
+  let match = findExact(pool);
+  if (!match && secondaryToken && secondaryToken !== primaryToken) {
+    const secondary = await bdlFetch("/players", { search: secondaryToken, per_page: 100 });
+    if (secondary?.data?.length) {
+      pool = [...pool, ...secondary.data];
+      match = findExact(pool);
+    }
+  }
+  // Tier 3: nickname/short-form fallback on last name + first-name prefix.
+  // Requires one first name to be a prefix of the other so "Steph Curry" still
+  // resolves to "Stephen Curry" but "Jalen Williams" does NOT collapse onto
+  // "Johnathan Williams" (a Lakers-era player who shares only the initial).
+  let fuzzyMatch = null;
+  if (!match && firstNorm) {
+    fuzzyMatch = pool.find((p) => {
+      if (normName(p.last_name) !== lastNorm) return false;
+      const candidateFirst = normalize(p.first_name);
+      if (!candidateFirst) return false;
+      return candidateFirst.startsWith(firstNorm) || firstNorm.startsWith(candidateFirst);
+    });
+    match = fuzzyMatch;
+  }
   if (!match) return null;
-  if (!exactWithSuffix && !exactFull && firstInitialMatch) {
-    log.warn("balldontlie.fuzzy_match", { name, matched: `${firstInitialMatch.first_name} ${firstInitialMatch.last_name}` });
+  if (fuzzyMatch) {
+    log.warn("balldontlie.fuzzy_match", { name, matched: `${fuzzyMatch.first_name} ${fuzzyMatch.last_name}` });
   }
   const result = {
     id: match.id,
