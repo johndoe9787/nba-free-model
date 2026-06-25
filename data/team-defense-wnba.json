@@ -1,96 +1,96 @@
 {
   "season": "2026",
-  "fetched_at": "2026-05-16T06:20:09.385Z",
+  "fetched_at": "2026-06-25T13:09:27.676Z",
   "seasons": {
     "Regular Season": {
-      "TOR": {
-        "team_id": 1611661332,
-        "team_name": "Toronto Tempo",
-        "def_rating": 98.4,
+      "MIN": {
+        "team_id": 1611661324,
+        "team_name": "Minnesota Lynx",
+        "def_rating": 97.5,
         "def_rank": 1
-      },
-      "ATL": {
-        "team_id": 1611661330,
-        "team_name": "Atlanta Dream",
-        "def_rating": 98.8,
-        "def_rank": 2
-      },
-      "CHI": {
-        "team_id": 1611661329,
-        "team_name": "Chicago Sky",
-        "def_rating": 98.8,
-        "def_rank": 3
       },
       "GSV": {
         "team_id": 1611661331,
         "team_name": "Golden State Valkyries",
-        "def_rating": 100.9,
+        "def_rating": 102.8,
+        "def_rank": 2
+      },
+      "NYL": {
+        "team_id": 1611661313,
+        "team_name": "New York Liberty",
+        "def_rating": 103.2,
+        "def_rank": 3
+      },
+      "ATL": {
+        "team_id": 1611661330,
+        "team_name": "Atlanta Dream",
+        "def_rating": 103.8,
         "def_rank": 4
       },
       "WAS": {
         "team_id": 1611661322,
         "team_name": "Washington Mystics",
-        "def_rating": 101.1,
+        "def_rating": 104.9,
         "def_rank": 5
-      },
-      "LVA": {
-        "team_id": 1611661319,
-        "team_name": "Las Vegas Aces",
-        "def_rating": 102.1,
-        "def_rank": 6
-      },
-      "PHX": {
-        "team_id": 1611661317,
-        "team_name": "Phoenix Mercury",
-        "def_rating": 102.2,
-        "def_rank": 7
-      },
-      "NYL": {
-        "team_id": 1611661313,
-        "team_name": "New York Liberty",
-        "def_rating": 102.7,
-        "def_rank": 8
-      },
-      "SEA": {
-        "team_id": 1611661328,
-        "team_name": "Seattle Storm",
-        "def_rating": 106.1,
-        "def_rank": 9
-      },
-      "MIN": {
-        "team_id": 1611661324,
-        "team_name": "Minnesota Lynx",
-        "def_rating": 106.5,
-        "def_rank": 10
-      },
-      "IND": {
-        "team_id": 1611661325,
-        "team_name": "Indiana Fever",
-        "def_rating": 108.6,
-        "def_rank": 11
       },
       "DAL": {
         "team_id": 1611661321,
         "team_name": "Dallas Wings",
-        "def_rating": 110.2,
-        "def_rank": 12
+        "def_rating": 105.1,
+        "def_rank": 6
+      },
+      "CHI": {
+        "team_id": 1611661329,
+        "team_name": "Chicago Sky",
+        "def_rating": 106.5,
+        "def_rank": 7
+      },
+      "IND": {
+        "team_id": 1611661325,
+        "team_name": "Indiana Fever",
+        "def_rating": 106.7,
+        "def_rank": 8
+      },
+      "LVA": {
+        "team_id": 1611661319,
+        "team_name": "Las Vegas Aces",
+        "def_rating": 107.2,
+        "def_rank": 9
+      },
+      "SEA": {
+        "team_id": 1611661328,
+        "team_name": "Seattle Storm",
+        "def_rating": 107.7,
+        "def_rank": 10
       },
       "CON": {
         "team_id": 1611661323,
         "team_name": "Connecticut Sun",
-        "def_rating": 115.2,
+        "def_rating": 109.2,
+        "def_rank": 11
+      },
+      "PHX": {
+        "team_id": 1611661317,
+        "team_name": "Phoenix Mercury",
+        "def_rating": 109.2,
+        "def_rank": 12
+      },
+      "TOR": {
+        "team_id": 1611661332,
+        "team_name": "Toronto Tempo",
+        "def_rating": 111.1,
         "def_rank": 13
       },
       "LAS": {
         "team_id": 1611661320,
         "team_name": "Los Angeles Sparks",
-        "def_rating": 117.6,
+        "def_rating": 111.6,
         "def_rank": 14
       },
       "PDX": {
         "team_id": 1611661327,
         "team_name": "Portland Fire",
-        "def_rating": 119,
+        "def_rating": 112.7,
         "def_rank": 15
       }
     },
